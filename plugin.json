@@ -1,0 +1,91 @@
+{
+  "name": "athenamem",
+  "version": "0.1.0",
+  "description": "Biomimetic memory stack for AI agents — palace architecture, WAL enforcement, contradiction detection, DAG compaction",
+  "author": "Chris Valk",
+  "openclaw": {
+    "compatibility": ">=2026.4.0",
+    "requires": ["gateway", "gateway.router", "gateway.llm", "gateway.memory"]
+  },
+  "memory": {
+    "slot": "athenamem"
+  },
+  "gateway": {
+    "llm_write": {
+      "on": ["athenamem_retain", "athenamem_checkpoint", "athenamem_compact"]
+    },
+    "tools": [
+      "athenamem_status",
+      "athenamem_list_wings",
+      "athenamem_list_rooms",
+      "athenamem_search",
+      "athenamem_get_aaak_spec",
+      "athenamem_add_drawer",
+      "athenamem_delete_drawer",
+      "athenamem_kg_query",
+      "athenamem_kg_add",
+      "athenamem_kg_invalidate",
+      "athenamem_kg_timeline",
+      "athenamem_check_facts",
+      "athenamem_resolve_conflict",
+      "athenamem_diary_write",
+      "athenamem_diary_read",
+      "athenamem_traverse",
+      "athenamem_find_tunnels",
+      "athenamem_recall"
+    ]
+  },
+  "config": {
+    "data_dir": {
+      "type": "string",
+      "default": "~/.openclaw/workspace/athenamem/data",
+      "description": "Where AthenaMem stores its KG and WAL files"
+    },
+    "palace_dir": {
+      "type": "string",
+      "default": "~/.openclaw/workspace/athenamem/palace",
+      "description": "Palace structure (wings, rooms, closets, drawers)"
+    },
+    "compact_on_flush": {
+      "type": "boolean",
+      "default": true,
+      "description": "Run DAG compaction when context window is about to flush"
+    },
+    "contradiction_check": {
+      "type": "boolean",
+      "default": true,
+      "description": "Check new facts against KG for contradictions on every retain"
+    },
+    "auto_wal": {
+      "type": "boolean",
+      "default": true,
+      "description": "Enforce WAL write-before-respond on every agent turn"
+    },
+    "qmd_path": {
+      "type": "string",
+      "default": "~/.cache/qmd",
+      "description": "Path to qmd search index"
+    },
+    "clawvault_path": {
+      "type": "string",
+      "default": "~/.openclaw/workspace/memory",
+      "description": "Path to ClawVault memory files"
+    },
+    "hindsight_url": {
+      "type": "string",
+      "default": "http://127.0.0.1:8888",
+      "description": "Hindsight API URL for cross-system recall"
+    },
+    "mnemo_url": {
+      "type": "string",
+      "default": "http://127.0.0.1:50001",
+      "description": "Mnemo Cortex API URL for context retrieval"
+    }
+  },
+  "hooks": {
+    "on_agent_boot": "athenamem_wake",
+    "on_agent_sleep": "athenamem_sleep",
+    "on_turn": "athenamem_on_turn",
+    "on_flush": "athenamem_on_flush"
+  }
+}

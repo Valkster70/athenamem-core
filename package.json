@@ -1,0 +1,42 @@
+{
+  "name": "athenamem",
+  "version": "0.1.0",
+  "description": "Biomimetic memory stack for AI agents — the memory that learns",
+  "license": "MIT",
+  "type": "module",
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  },
+  "bin": {
+    "athenamem": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "test": "vitest",
+    "dev": "tsx src/cli/index.ts",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "chalk": "^5.4.1",
+    "conf": "^12.0.0",
+    "sql.js": "^1.12.0",
+    "toml": "^3.0.0",
+    "uuid": "^11.1.0",
+    "yaml": "^2.7.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@sinclair/typebox": "^0.34.49",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.13.10",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.1.1"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
