@@ -44,7 +44,7 @@ export interface SearchOptions {
   sources?: SearchSource[]; // which systems to query (default: all)
   limit?: number;           // max results (default: 20)
   fuseK?: number;           // RRF k parameter (default: 60)
-  minScore?: number;        // minimum fused score (default: 0.1)
+  minScore?: number;        // minimum fused score (default: 0.01)
   includeArchived?: boolean; // include cold/archival storage
 }
 
@@ -135,7 +135,7 @@ export class SearchOrchestrator {
       sources,
       limit = 20,
       fuseK = 60,
-      minScore = 0.1,
+      minScore = 0.01,  // 1/(60+1) ≈ 0.016 for single rank-1 result
     } = options;
 
     const allSources: SearchSource[] = sources ?? ['qmd', 'clawvault', 'hindsight', 'mnemo', 'kg'];
@@ -144,6 +144,7 @@ export class SearchOrchestrator {
     // Fire all system queries in parallel
     const queries: Promise<SearchResult[]>[] = [];
     const sourceMap: SearchSource[] = [];
+    const resultsById = new Map<string, SearchResult>();
 
     for (const source of allSources) {
       queries.push(this.querySystem(source, query, wing, room, limit));
@@ -162,6 +163,7 @@ export class SearchOrchestrator {
         const res = outcome.value;
         details[source] = { results_count: res.length, query_ms: 0 };
         if (res.length > 0) sourcesWithResults.push(source);
+        for (const r of res) { resultsById.set(r.id, r); }
         rankedLists.push(this.toRankedMap(res));
       } else {
         details[source] = { results_count: 0, query_ms: 0, error: String(outcome.reason) };
@@ -180,9 +182,11 @@ export class SearchOrchestrator {
       let best: SearchResult | null = null;
       for (const list of rankedLists) {
         const entry = list.get(id);
-        if (entry && (!best || entry.score > (best.score ?? 0))) {
-          const res = this.findResultById(rankedLists, id);
-          if (res) best = res;
+        if (entry) {
+          const res = resultsById.get(id);
+          if (res && (!best || entry.score > (best.score ?? 0))) {
+            best = res;
+          }
         }
       }
       if (best) {

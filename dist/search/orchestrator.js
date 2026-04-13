@@ -57,12 +57,14 @@ export class SearchOrchestrator {
      */
     async search(options) {
         const start = Date.now();
-        const { query, wing, room, sources, limit = 20, fuseK = 60, minScore = 0.1, } = options;
+        const { query, wing, room, sources, limit = 20, fuseK = 60, minScore = 0.01, // 1/(60+1) ≈ 0.016 for single rank-1 result
+         } = options;
         const allSources = sources ?? ['qmd', 'clawvault', 'hindsight', 'mnemo', 'kg'];
         const details = {};
         // Fire all system queries in parallel
         const queries = [];
         const sourceMap = [];
+        const resultsById = new Map();
         for (const source of allSources) {
             queries.push(this.querySystem(source, query, wing, room, limit));
             sourceMap.push(source);
@@ -78,6 +80,9 @@ export class SearchOrchestrator {
                 details[source] = { results_count: res.length, query_ms: 0 };
                 if (res.length > 0)
                     sourcesWithResults.push(source);
+                for (const r of res) {
+                    resultsById.set(r.id, r);
+                }
                 rankedLists.push(this.toRankedMap(res));
             }
             else {
@@ -95,10 +100,11 @@ export class SearchOrchestrator {
             let best = null;
             for (const list of rankedLists) {
                 const entry = list.get(id);
-                if (entry && (!best || entry.score > (best.score ?? 0))) {
-                    const res = this.findResultById(rankedLists, id);
-                    if (res)
+                if (entry) {
+                    const res = resultsById.get(id);
+                    if (res && (!best || entry.score > (best.score ?? 0))) {
                         best = res;
+                    }
                 }
             }
             if (best) {
