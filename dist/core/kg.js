@@ -251,9 +251,9 @@ export class KnowledgeGraph {
         const id = uuidv4();
         const now = Date.now();
         this.db.prepare(`
-      INSERT INTO memories (id, drawer_id, content, summary, memory_type, room, wing, importance, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, drawerId, content, summary, memoryType, room, wing, importance, now);
+      INSERT INTO memories (id, drawer_id, content, summary, memory_type, room, wing, importance, created_at, entry_id, section, module, contradiction_flag, access_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, drawerId, content, summary, memoryType, room, wing, importance, now, drawerId, room, wing, 0, 0);
         return {
             id, drawer_id: drawerId, content, summary, memory_type: memoryType,
             room, wing, importance, contradiction_flag: false, contradiction_with: null,

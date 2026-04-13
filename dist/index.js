@@ -75,7 +75,7 @@ const RecallSchema = Type.Object({
 });
 // ─── Plugin definition ─────────────────────────────────────────────────────────
 const athenamem = definePluginEntry({
-    id: "athenamem",
+    id: "athenamem-core",
     name: "AthenaMem",
     description: "Biomimetic memory stack — palace architecture, WAL enforcement, " +
         "contradiction detection, DAG compaction, cross-system recall.",
