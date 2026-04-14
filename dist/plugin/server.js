@@ -36,13 +36,13 @@ export async function init(config = {}) {
     const home = process.env.HOME ?? '/home/chris';
     const workDir = path.join(home, '.openclaw', 'workspace', 'athenamem');
     const cfg = {
-        data_dir: config.data_dir ?? path.join(workDir, 'data'),
-        palace_dir: config.palace_dir ?? path.join(workDir, 'palace'),
+        data_dir: (config.data_dir && config.data_dir.startsWith("~")) ? expandPath(config.data_dir) : (config.data_dir ?? path.join(workDir, 'data')),
+        palace_dir: (config.palace_dir && config.palace_dir.startsWith("~")) ? expandPath(config.palace_dir) : (config.palace_dir ?? path.join(workDir, 'palace')),
         compact_on_flush: config.compact_on_flush ?? true,
         contradiction_check: config.contradiction_check ?? true,
         auto_wal: config.auto_wal ?? true,
-        qmd_path: config.qmd_path ?? path.join(home, '.cache', 'qmd'),
-        clawvault_path: config.clawvault_path ?? path.join(home, '.openclaw', 'workspace', 'memory'),
+        qmd_path: (config.qmd_path && config.qmd_path.startsWith("~")) ? expandPath(config.qmd_path) : (config.qmd_path ?? path.join(home, '.cache', 'qmd')),
+        clawvault_path: (config.clawvault_path && config.clawvault_path.startsWith("~")) ? expandPath(config.clawvault_path) : (config.clawvault_path ?? path.join(home, '.openclaw', 'workspace', 'memory')),
         hindsight_url: config.hindsight_url ?? 'http://127.0.0.1:8888',
         mnemo_url: config.mnemo_url ?? 'http://127.0.0.1:50001',
     };

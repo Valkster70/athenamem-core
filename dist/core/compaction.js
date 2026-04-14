@@ -47,7 +47,7 @@ export class CompactionEngine {
         fs.writeFileSync(nodesFile, JSON.stringify(data, null, 2), 'utf-8');
     }
     // ─── Core Operations ────────────────────────────────────────────────────────
-    async compact(sourceIds, level, wing, room) {
+    async compact(sourceIds, level, module, section) {
         if (level < 1 || level > 3) {
             throw new Error('Compaction level must be 1, 2, or 3');
         }
@@ -133,7 +133,7 @@ export class CompactionEngine {
         const toCompact = [];
         const byLocation = new Map();
         for (const m of memories) {
-            const key = `${m.wing}::${m.room}`;
+            const key = `${m.module}::${m.section}`;
             if (!byLocation.has(key))
                 byLocation.set(key, []);
             byLocation.get(key).push(m);

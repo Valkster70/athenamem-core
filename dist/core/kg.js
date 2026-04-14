@@ -1,11 +1,11 @@
 /**
- * AthenaMem Knowledge Graph
+ * AthenaMem Core Knowledge Graph
  *
  * Temporal entity-relation graph with validity windows.
  * Inspired by MemPalace's KG + Hindsight's biomimetic structure.
  *
  * Entities have validity windows — queries can ask "what was true at time X?"
- * Every fact is traceable to a source drawer.
+ * Every fact is traceable to a source entry.
  */
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
@@ -24,7 +24,7 @@ export const PredicateSchema = z.enum([
 export const MemoryTypeSchema = z.enum([
     'conversation', 'decision', 'lesson', 'event', 'preference', 'fact', 'discovery', 'advice'
 ]);
-export const HallTypeSchema = z.enum([
+export const CategoryTypeSchema = z.enum([
     'facts', 'events', 'discoveries', 'preferences', 'advice'
 ]);
 // ─── KnowledgeGraph Class ─────────────────────────────────────────────────────
@@ -77,14 +77,14 @@ export class KnowledgeGraph {
       -- Memory items (verbatim + derived)
       CREATE TABLE IF NOT EXISTS memories (
         id TEXT PRIMARY KEY,
-        drawer_id TEXT NOT NULL,
+        entry_id TEXT NOT NULL,
         content TEXT NOT NULL,
         summary TEXT,
         memory_type TEXT NOT NULL CHECK (memory_type IN (
           'conversation','decision','lesson','event','preference','fact','discovery','advice'
         )),
-        room TEXT NOT NULL,
-        wing TEXT NOT NULL,
+        section TEXT NOT NULL,
+        module TEXT NOT NULL,
         importance REAL NOT NULL DEFAULT 0.5,
         contradiction_flag INTEGER NOT NULL DEFAULT 0,
         contradiction_with TEXT,
@@ -93,7 +93,18 @@ export class KnowledgeGraph {
         access_count INTEGER NOT NULL DEFAULT 0
       );
 
-      -- Drawers (verbatim storage)
+      -- Entries (verbatim storage) - replaces drawers
+      CREATE TABLE IF NOT EXISTS entries (
+        entry_id TEXT PRIMARY KEY,
+        module TEXT NOT NULL,
+        section TEXT NOT NULL,
+        category TEXT NOT NULL CHECK (category IN ('facts','events','discoveries','preferences','advice')),
+        file_path TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+      );
+
+      -- Legacy drawers table for backwards compatibility
       CREATE TABLE IF NOT EXISTS drawers (
         drawer_id TEXT PRIMARY KEY,
         wing TEXT NOT NULL,
@@ -139,9 +150,10 @@ export class KnowledgeGraph {
       CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject_id);
       CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object_id);
       CREATE INDEX IF NOT EXISTS idx_relations_predicate ON relations(predicate);
-      CREATE INDEX IF NOT EXISTS idx_memories_wing_room ON memories(wing, room);
+      CREATE INDEX IF NOT EXISTS idx_memories_module_section ON memories(module, section);
       CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
       CREATE INDEX IF NOT EXISTS idx_memories_contradiction ON memories(contradiction_flag) WHERE contradiction_flag = 1;
+      CREATE INDEX IF NOT EXISTS idx_entries_module ON entries(module);
       CREATE INDEX IF NOT EXISTS idx_drawers_wing ON drawers(wing);
     `);
     }
@@ -175,7 +187,8 @@ export class KnowledgeGraph {
             const sql = include_expired
                 ? 'SELECT * FROM entities WHERE id = ?'
                 : 'SELECT * FROM entities WHERE id = ? AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ?';
-            return this.db.prepare(sql).all(entity_id, as_of, as_of).map(this.parseEntity);
+            const row = this.db.prepare(sql).get(entity_id, as_of, as_of);
+            return row ? [this.parseEntity(row)] : [];
         }
         const sql = include_expired
             ? 'SELECT * FROM entities'
@@ -245,60 +258,100 @@ export class KnowledgeGraph {
     }
     // ─── Memory Operations ──────────────────────────────────────────────────────
     /**
-     * Store a memory item, linked to a drawer.
+     * Store a memory item, linked to an entry.
      */
-    addMemory(drawerId, content, memoryType, room, wing, summary = null, importance = 0.5) {
+    addMemory(entryId, content, memoryType, section, module, summary = null, importance = 0.5) {
         const id = uuidv4();
         const now = Date.now();
         this.db.prepare(`
-      INSERT INTO memories (id, drawer_id, content, summary, memory_type, room, wing, importance, created_at, entry_id, section, module, contradiction_flag, access_count)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, drawerId, content, summary, memoryType, room, wing, importance, now, drawerId, room, wing, 0, 0);
+      INSERT INTO memories (id, entry_id, content, summary, memory_type, section, module, importance, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, entryId, content, summary, memoryType, section, module, importance, now);
         return {
-            id, drawer_id: drawerId, content, summary, memory_type: memoryType,
-            room, wing, importance, contradiction_flag: false, contradiction_with: null,
+            id, entry_id: entryId, content, summary, memory_type: memoryType,
+            section, module, importance, contradiction_flag: false, contradiction_with: null,
             created_at: now, last_accessed: null, access_count: 0
         };
     }
     /**
      * Search memories using FTS5.
+     * Falls back to LIKE query if FTS returns no results.
      */
-    searchMemories(query, wing, room, limit = 20) {
+    searchMemories(query, module, section, limit = 20) {
+        // Try FTS5 first
         let sql = `
       SELECT m.* FROM memories m
       JOIN memories_fts fts ON m.rowid = fts.rowid
       WHERE memories_fts MATCH ?
     `;
         const params = [query];
-        if (wing) {
-            sql += ' AND m.wing = ?';
-            params.push(wing);
+        if (module) {
+            sql += ' AND m.module = ?';
+            params.push(module);
         }
-        if (room) {
-            sql += ' AND m.room = ?';
-            params.push(room);
+        if (section) {
+            sql += ' AND m.section = ?';
+            params.push(section);
         }
         sql += ' ORDER BY rank LIMIT ?';
         params.push(limit);
-        const rows = this.db.prepare(sql).all(...params);
+        try {
+            const rows = this.db.prepare(sql).all(...params);
+            if (rows.length > 0) {
+                return rows.map(row => ({ ...row, contradiction_flag: row.contradiction_flag === 1 }));
+            }
+        }
+        catch (e) {
+            // FTS might fail on some queries, fall through to LIKE
+        }
+        // Fallback: LIKE query for broader matching
+        let fallbackSql = `SELECT * FROM memories WHERE content LIKE ?`;
+        const fallbackParams = [`%${query}%`];
+        if (module) {
+            fallbackSql += ' AND module = ?';
+            fallbackParams.push(module);
+        }
+        if (section) {
+            fallbackSql += ' AND section = ?';
+            fallbackParams.push(section);
+        }
+        fallbackSql += ' ORDER BY created_at DESC LIMIT ?';
+        fallbackParams.push(limit);
+        const rows = this.db.prepare(fallbackSql).all(...fallbackParams);
         return rows.map(row => ({ ...row, contradiction_flag: row.contradiction_flag === 1 }));
     }
     /**
-     * Get memories by wing and room (palace navigation).
+     * Rebuild the FTS5 index from scratch.
+     * Use when FTS is out of sync or returning no results.
      */
-    getMemoriesByPalace(wing, room, hall) {
-        let sql = 'SELECT m.* FROM memories m JOIN drawers d ON m.drawer_id = d.drawer_id WHERE m.wing = ?';
-        const params = [wing];
-        if (room) {
-            sql += ' AND m.room = ?';
-            params.push(room);
+    rebuildFTSIndex() {
+        this.db.exec(`
+      INSERT INTO memories_fts(memories_fts) VALUES('rebuild');
+    `);
+    }
+    /**
+     * Get memories by module and section (structure navigation).
+     */
+    getMemoriesByStructure(module, section, category) {
+        let sql = 'SELECT m.* FROM memories m JOIN entries e ON m.entry_id = e.entry_id WHERE m.module = ?';
+        const params = [module];
+        if (section) {
+            sql += ' AND m.section = ?';
+            params.push(section);
         }
-        if (hall) {
-            sql += ' AND d.hall = ?';
-            params.push(hall);
+        if (category) {
+            sql += ' AND e.category = ?';
+            params.push(category);
         }
         sql += ' ORDER BY m.created_at DESC';
         return this.db.prepare(sql).all(...params).map(row => ({ ...row, contradiction_flag: row.contradiction_flag === 1 }));
+    }
+    /**
+     * Legacy method: Get memories by wing and room (palace navigation).
+     * Maps to new structure terminology.
+     */
+    getMemoriesByPalace(wing, room, hall) {
+        return this.getMemoriesByStructure(wing, room, hall);
     }
     /**
      * Mark a memory as contradictory.
@@ -316,14 +369,30 @@ export class KnowledgeGraph {
       UPDATE memories SET last_accessed = ?, access_count = access_count + 1 WHERE id = ?
     `).run(Date.now(), memoryId);
     }
-    // ─── Drawer Operations ──────────────────────────────────────────────────────
+    // ─── Entry Operations ──────────────────────────────────────────────────────
     /**
-     * Register a drawer (a file containing verbatim content).
+     * Register an entry (a file containing verbatim content).
+     */
+    addEntry(module, section, category, filePath, contentHash) {
+        const entryId = uuidv4();
+        const now = Date.now();
+        // Upsert — entry is uniquely identified by file_path
+        this.db.prepare(`
+      INSERT OR REPLACE INTO entries (entry_id, module, section, category, file_path, content_hash, created_at)
+      VALUES (
+        COALESCE((SELECT entry_id FROM entries WHERE file_path = ?), ?),
+        ?, ?, ?, ?, ?, ?
+      )
+    `).run(filePath, entryId, module, section, category, filePath, contentHash, now);
+        const row = this.db.prepare('SELECT * FROM entries WHERE file_path = ?').get(filePath);
+        return row;
+    }
+    /**
+     * Legacy method: Register a drawer (maps to entry).
      */
     addDrawer(wing, room, hall, filePath, contentHash) {
         const drawerId = uuidv4();
         const now = Date.now();
-        // Upsert — drawer is uniquely identified by file_path
         this.db.prepare(`
       INSERT OR REPLACE INTO drawers (drawer_id, wing, room, hall, file_path, content_hash, created_at)
       VALUES (
@@ -335,7 +404,13 @@ export class KnowledgeGraph {
         return row;
     }
     /**
-     * Get drawer by path.
+     * Get entry by path.
+     */
+    getEntry(filePath) {
+        return this.db.prepare('SELECT * FROM entries WHERE file_path = ?').get(filePath) ?? null;
+    }
+    /**
+     * Legacy method: Get drawer by path.
      */
     getDrawer(filePath) {
         return this.db.prepare('SELECT * FROM drawers WHERE file_path = ?').get(filePath) ?? null;
@@ -384,9 +459,9 @@ export class KnowledgeGraph {
         const active_entities = this.db.prepare('SELECT COUNT(*) as c FROM entities WHERE valid_to IS NULL').get().c;
         const relation_count = this.db.prepare('SELECT COUNT(*) as c FROM relations').get().c;
         const memory_count = this.db.prepare('SELECT COUNT(*) as c FROM memories').get().c;
-        const drawer_count = this.db.prepare('SELECT COUNT(*) as c FROM drawers').get().c;
+        const entry_count = this.db.prepare('SELECT COUNT(*) as c FROM entries').get().c;
         const contradictions = this.db.prepare('SELECT COUNT(*) as c FROM memories WHERE contradiction_flag = 1').get().c;
-        return { entity_count, relation_count, memory_count, drawer_count, active_entities, contradictions };
+        return { entity_count, relation_count, memory_count, entry_count, active_entities, contradictions };
     }
     // ─── Helper ─────────────────────────────────────────────────────────────────
     parseEntity(row) {
@@ -409,6 +484,7 @@ export class KnowledgeGraph {
             entities: this.db.prepare('SELECT * FROM entities').all(),
             relations: this.db.prepare('SELECT * FROM relations').all(),
             memories: this.db.prepare('SELECT * FROM memories').all(),
+            entries: this.db.prepare('SELECT * FROM entries').all(),
             drawers: this.db.prepare('SELECT * FROM drawers').all(),
         };
     }
@@ -425,8 +501,12 @@ export class KnowledgeGraph {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
         const insertMemory = this.db.prepare(`
-      INSERT OR REPLACE INTO memories (id, drawer_id, content, summary, memory_type, room, wing, importance, contradiction_flag, contradiction_with, created_at, last_accessed, access_count)
+      INSERT OR REPLACE INTO memories (id, entry_id, content, summary, memory_type, section, module, importance, contradiction_flag, contradiction_with, created_at, last_accessed, access_count)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+        const insertEntry = this.db.prepare(`
+      INSERT OR REPLACE INTO entries (entry_id, module, section, category, file_path, content_hash, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
         const insertDrawer = this.db.prepare(`
       INSERT OR REPLACE INTO drawers (drawer_id, wing, room, hall, file_path, content_hash, created_at)
@@ -440,10 +520,17 @@ export class KnowledgeGraph {
                 insertRelation.run(r.id, r.subject_id, r.predicate, r.object_id, r.valid_from, r.valid_to, r.confidence, r.source, r.created_at);
             }
             for (const m of data.memories) {
-                insertMemory.run(m.id, m.drawer_id, m.content, m.summary, m.memory_type, m.room, m.wing, m.importance, m.contradiction_flag ? 1 : 0, m.contradiction_with, m.created_at, m.last_accessed, m.access_count);
+                insertMemory.run(m.id, m.entry_id, m.content, m.summary, m.memory_type, m.section, m.module, m.importance, m.contradiction_flag ? 1 : 0, m.contradiction_with, m.created_at, m.last_accessed, m.access_count);
             }
-            for (const d of data.drawers) {
-                insertDrawer.run(d.drawer_id, d.wing, d.room, d.hall, d.file_path, d.content_hash, d.created_at);
+            if (data.entries) {
+                for (const e of data.entries) {
+                    insertEntry.run(e.entry_id, e.module, e.section, e.category, e.file_path, e.content_hash, e.created_at);
+                }
+            }
+            if (data.drawers) {
+                for (const d of data.drawers) {
+                    insertDrawer.run(d.drawer_id, d.wing, d.room, d.hall, d.file_path, d.content_hash, d.created_at);
+                }
             }
         });
         txn();

@@ -4,6 +4,8 @@
  */
 
 import { Type } from "@sinclair/typebox";
+import { homedir } from "os";
+import * as path from "path";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import {
   init,
@@ -140,17 +142,20 @@ const athenamem = definePluginEntry({
   },
 
   register(api) {
+    // Expand ~ to home directory
+    const expandPath = (p: string) => p && p.startsWith("~") ? path.join(homedir(), p.slice(1)) : p;
+
     const cfg = api.pluginConfig as Record<string, unknown> | undefined;
 
     // ── Initialize AthenaMem core ──────────────────────────────────────────
     init({
-      data_dir: String(cfg?.data_dir ?? "~/.openclaw/workspace/athenamem/data"),
-      palace_dir: String(cfg?.palace_dir ?? "~/.openclaw/workspace/athenamem/palace"),
+      data_dir: expandPath(String(cfg?.data_dir ?? "~/.openclaw/workspace/athenamem/data")),
+      palace_dir: expandPath(String(cfg?.palace_dir ?? "~/.openclaw/workspace/athenamem/palace")),
       compact_on_flush: Boolean(cfg?.compact_on_flush ?? true),
       contradiction_check: Boolean(cfg?.contradiction_check ?? true),
       auto_wal: Boolean(cfg?.auto_wal ?? true),
-      qmd_path: String(cfg?.qmd_path ?? "~/.cache/qmd"),
-      clawvault_path: String(cfg?.clawvault_path ?? "~/.openclaw/workspace/memory"),
+      qmd_path: expandPath(String(cfg?.qmd_path ?? "~/.cache/qmd")),
+      clawvault_path: expandPath(String(cfg?.clawvault_path ?? "~/.openclaw/workspace/memory")),
       hindsight_url: String(cfg?.hindsight_url ?? "http://127.0.0.1:8888"),
       mnemo_url: String(cfg?.mnemo_url ?? "http://127.0.0.1:50001"),
     });

@@ -272,7 +272,7 @@ export class Palace {
    */
   getDrawers(wingName: string, roomName?: string, hall?: HallType): Drawer[] {
     const memories = this.kg.getMemoriesByPalace(wingName, roomName, hall);
-    const drawerIds = [...new Set(memories.map(m => m.drawer_id))];
+    const drawerIds = [...new Set(memories.map(m => (m as any).drawer_id))];
 
     return drawerIds
       .map(id => {

@@ -8,25 +8,25 @@
  *
  * Commands:
  *   init              Initialize AthenaMem workspace
- *   status            Show palace overview + system health
+ *   status            Show structure overview + system health
  *   wake              Load L0 + L1 context (for agent bootstrap)
  *   checkpoint        Save current state (WAL enforcement)
  *   sleep <summary>   End session, finalize
  *   remember          Store a new memory
  *   recall <query>    Search across all memory systems
  *   search <query>    Quick search (qmd + KG only)
- *   wings [list]      List or manage wings
- *   rooms <wing>      List rooms in a wing
+ *   modules [list]    List or manage modules
+ *   sections <module> List sections in a module
  *   diary <agent>     Write/read agent diary
  *   audit             Check for contradictions
  *   compact           Run DAG compaction
  *   stats             Show KG statistics
  *   export            Export KG as JSON
  *   import <file>     Import KG from JSON
- *   tunnel <from> <to> <room>  Create cross-wing tunnel
+ *   bridge <from> <to> <section>  Create cross-module bridge
  */
 import { KnowledgeGraph } from '../core/kg.js';
-import { Palace } from '../core/palace.js';
+import { Structure } from '../core/structure.js';
 import { WALManager } from '../core/wal.js';
 import { SearchOrchestrator, formatSearchResults } from '../search/orchestrator.js';
 import * as fs from 'fs';
@@ -51,15 +51,15 @@ async function runCommand(cmd, args) {
     const home = process.env.HOME ?? '/home/chris';
     const workDir = path.join(home, '.openclaw', 'workspace', 'athenamem');
     const dataDir = path.join(workDir, 'data');
-    const palaceDir = path.join(workDir, 'palace');
+    const structureDir = path.join(workDir, 'structure');
     // Ensure directories exist
-    for (const dir of [workDir, dataDir, palaceDir]) {
+    for (const dir of [workDir, dataDir, structureDir]) {
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
         }
     }
     const kg = new KnowledgeGraph(path.join(dataDir, 'athenamem.db'));
-    const palace = new Palace(kg, palaceDir);
+    const structure = new Structure(kg, structureDir);
     const wal = new WALManager(path.join(dataDir, 'wal'));
     switch (cmd) {
         case 'help':
@@ -67,37 +67,39 @@ async function runCommand(cmd, args) {
         case 'init':
             return cmdInit(workDir, args);
         case 'status':
-            return cmdStatus(kg, palace);
+            return cmdStatus(kg, structure);
         case 'wake':
-            return cmdWake(kg, palace, wal, workDir);
+            return cmdWake(kg, structure, wal, workDir);
         case 'checkpoint':
-            return cmdCheckpoint(kg, palace, wal, workDir, args);
+            return cmdCheckpoint(kg, structure, wal, workDir, args);
         case 'sleep':
-            return cmdSleep(kg, palace, wal, workDir, args);
+            return cmdSleep(kg, structure, wal, workDir, args);
         case 'remember':
-            return cmdRemember(kg, palace, args);
+            return cmdRemember(kg, structure, args);
         case 'recall':
-            return cmdRecall(kg, palace, args);
+            return cmdRecall(kg, structure, args);
         case 'search':
-            return cmdSearch(kg, palace, args);
-        case 'wings':
-            return cmdWings(palace, args);
-        case 'rooms':
-            return cmdRooms(palace, args);
+            return cmdSearch(kg, structure, args);
+        case 'rebuild-fts':
+            return cmdRebuildFTS(kg);
+        case 'modules':
+            return cmdModules(structure, args);
+        case 'sections':
+            return cmdSections(structure, args);
         case 'diary':
-            return cmdDiary(palace, args);
+            return cmdDiary(kg, structure, args);
         case 'audit':
             return cmdAudit(kg);
         case 'compact':
-            return cmdCompact(kg, palace, workDir);
+            return cmdCompact(kg, structure, workDir);
         case 'stats':
             return cmdStats(kg);
         case 'export':
             return cmdExport(kg, args);
         case 'import':
             return cmdImport(kg, args);
-        case 'tunnel':
-            return cmdTunnel(palace, args);
+        case 'bridge':
+            return cmdBridge(structure, args);
         case '--version':
         case 'version':
             return console.log(`AthenaMem v${VERSION}`);
@@ -111,24 +113,24 @@ function cmdInit(workDir, args) {
     console.log(`Initializing ${name} at ${workDir}...`);
     console.log('Done. Run "athenamem status" to verify.');
 }
-async function cmdStatus(kg, palace) {
+async function cmdStatus(kg, structure) {
     const stats = kg.stats();
-    const wings = palace.listWings();
+    const modules = structure.listModules();
     const walStats = new WALManager(path.join(process.env.HOME ?? '', '.openclaw', 'workspace', 'athenamem', 'data', 'wal')).stats();
     console.log(`
-# AthenaMem Palace Status
+# AthenaMem Structure Status
 =========================
 
 ## Knowledge Graph
   Entities:   ${stats.entity_count} (${stats.active_entities} active)
   Relations:   ${stats.relation_count}
   Memories:    ${stats.memory_count}
-  Drawers:     ${stats.drawer_count}
+  Entries:     ${stats.entry_count}
   Contradictions flagged: ${stats.contradictions}
 
-## Palace Wings
-  ${wings.length === 0 ? 'No wings created yet.' : ''}
-${wings.map(w => `  ${w.name} (${w.room_count} rooms, ${w.memory_count} memories)`).join('\n')}
+## Structure Modules
+  ${modules.length === 0 ? 'No modules created yet.' : ''}
+${modules.map(m => `  ${m.name} (${m.section_count} sections, ${m.memory_count} memories)`).join('\n')}
 
 ## WAL Status
   Total entries:  ${walStats.total_entries}
@@ -137,7 +139,7 @@ ${wings.map(w => `  ${w.name} (${w.room_count} rooms, ${w.memory_count} memories
   Recovery:       ${walStats.recovery_available ? '✅ Available' : '❌ None'}
 `);
 }
-async function cmdWake(kg, palace, wal, workDir) {
+async function cmdWake(kg, structure, wal, workDir) {
     const sessionStatePath = path.join(workDir, 'SESSION-STATE.md');
     const recovered = wal.recover();
     if (recovered) {
@@ -152,7 +154,7 @@ async function cmdWake(kg, palace, wal, workDir) {
         console.log('No previous state found — fresh session.');
     }
 }
-async function cmdCheckpoint(kg, palace, wal, workDir, args) {
+async function cmdCheckpoint(kg, structure, wal, workDir, args) {
     const sessionStatePath = path.join(workDir, 'SESSION-STATE.md');
     let sessionState = '';
     if (fs.existsSync(sessionStatePath)) {
@@ -165,7 +167,7 @@ async function cmdCheckpoint(kg, palace, wal, workDir, args) {
     });
     console.log(`✅ Checkpoint saved: ${walEntry.id.substring(0, 8)}...`);
 }
-async function cmdSleep(kg, palace, wal, workDir, args) {
+async function cmdSleep(kg, structure, wal, workDir, args) {
     const summary = args.join(' ') || 'Session ended.';
     const sessionStatePath = path.join(workDir, 'SESSION-STATE.md');
     let sessionState = '';
@@ -175,36 +177,36 @@ async function cmdSleep(kg, palace, wal, workDir, args) {
     wal.checkpoint({ session_state: sessionState, learnings: [summary] });
     console.log(`✅ Session ended. Summary: ${summary}`);
 }
-async function cmdRemember(kg, palace, args) {
-    // Usage: remember <wing> <room> [--content "text"] [--hall facts|events|discoveries|preferences|advice]
-    const wing = args[0];
-    const room = args[1];
-    if (!wing || !room)
-        throw new Error('Usage: athenamem remember <wing> <room> [--content "text"]');
+async function cmdRemember(kg, structure, args) {
+    // Usage: remember <module> <section> [--content "text"] [--category facts|events|discoveries|preferences|advice]
+    const module = args[0];
+    const section = args[1];
+    if (!module || !section)
+        throw new Error('Usage: athenamem remember <module> <section> [--content "text"]');
     const contentIdx = args.indexOf('--content');
-    const hallIdx = args.indexOf('--hall');
+    const categoryIdx = args.indexOf('--category');
     const content = contentIdx >= 0 ? args[contentIdx + 1] : '';
-    const hall = (hallIdx >= 0 ? args[hallIdx + 1] : 'facts');
+    const category = (categoryIdx >= 0 ? args[categoryIdx + 1] : 'facts');
     if (!content)
         throw new Error('--content is required');
-    const filePath = `${hall}/${wing}-${room}-${Date.now()}.md`;
-    const { drawer, memory } = palace.addDrawer(wing, room, hall, filePath, content);
-    console.log(`✅ Stored memory ${memory.id.substring(0, 8)}... in ${wing}/${room}/${hall}`);
-    console.log(`   Drawer: ${drawer.drawer_id.substring(0, 8)}...`);
+    const filePath = `${category}/${module}-${section}-${Date.now()}.md`;
+    const { entry, memory } = structure.addEntry(module, section, category, filePath, content);
+    console.log(`✅ Stored memory ${memory.id.substring(0, 8)}... in ${module}/${section}/${category}`);
+    console.log(`   Entry: ${entry.entry_id.substring(0, 8)}...`);
 }
-async function cmdRecall(kg, palace, args) {
+async function cmdRecall(kg, structure, args) {
     const query = args.join(' ');
     if (!query)
         throw new Error('Usage: athenamem recall <query>');
-    const orchestrator = new SearchOrchestrator(kg, palace);
+    const orchestrator = new SearchOrchestrator(kg, structure);
     const response = await orchestrator.deepSearch(query, 30);
     console.log(formatSearchResults(response));
 }
-async function cmdSearch(kg, palace, args) {
+async function cmdSearch(kg, structure, args) {
     const query = args.join(' ');
     if (!query)
         throw new Error('Usage: athenamem search <query>');
-    const orchestrator = new SearchOrchestrator(kg, palace);
+    const orchestrator = new SearchOrchestrator(kg, structure);
     const results = await orchestrator.quickSearch(query, 15);
     console.log(`# Quick Search: "${query}"\n`);
     for (const r of results) {
@@ -212,17 +214,17 @@ async function cmdSearch(kg, palace, args) {
         console.log('');
     }
 }
-async function cmdWings(palace, args) {
+async function cmdModules(structure, args) {
     const subcmd = args[0];
     if (subcmd === 'list' || !subcmd) {
-        const wings = palace.listWings();
-        if (wings.length === 0) {
-            console.log('No wings yet. Create one: athenamem wings add <name> [--desc "description"]');
+        const modules = structure.listModules();
+        if (modules.length === 0) {
+            console.log('No modules yet. Create one: athenamem modules add <name> [--desc "description"]');
             return;
         }
-        console.log('# Wings\n');
-        for (const w of wings) {
-            console.log(`  ${w.name} — ${w.description || '(no description)'} (${w.room_count} rooms, ${w.memory_count} memories)`);
+        console.log('# Modules\n');
+        for (const m of modules) {
+            console.log(`  ${m.name} — ${m.description || '(no description)'} (${m.section_count} sections, ${m.memory_count} memories)`);
         }
     }
     else if (subcmd === 'add') {
@@ -230,29 +232,29 @@ async function cmdWings(palace, args) {
         const descIdx = args.indexOf('--desc');
         const desc = descIdx >= 0 ? args[descIdx + 1] : '';
         if (!name)
-            throw new Error('Usage: athenamem wings add <name> [--desc "description"]');
-        palace.createWing(name, desc);
-        console.log(`✅ Created wing: ${name}`);
+            throw new Error('Usage: athenamem modules add <name> [--desc "description"]');
+        structure.createModule(name, desc);
+        console.log(`✅ Created module: ${name}`);
     }
     else {
-        throw new Error('Usage: athenamem wings [list|add]');
+        throw new Error('Usage: athenamem modules [list|add]');
     }
 }
-async function cmdRooms(palace, args) {
-    const wingName = args[0];
-    if (!wingName)
-        throw new Error('Usage: athenamem rooms <wing-name>');
-    const rooms = palace.listRooms(wingName);
-    if (rooms.length === 0) {
-        console.log(`No rooms in wing "${wingName}".`);
+async function cmdSections(structure, args) {
+    const moduleName = args[0];
+    if (!moduleName)
+        throw new Error('Usage: athenamem sections <module-name>');
+    const sections = structure.listSections(moduleName);
+    if (sections.length === 0) {
+        console.log(`No sections in module "${moduleName}".`);
         return;
     }
-    console.log(`# Rooms in ${wingName}\n`);
-    for (const r of rooms) {
-        console.log(`  ${r.name} — ${r.description || '(no description)'} (${r.memory_count} memories)`);
+    console.log(`# Sections in ${moduleName}\n`);
+    for (const s of sections) {
+        console.log(`  ${s.name} — ${s.description || '(no description)'} (${s.memory_count} memories)`);
     }
 }
-async function cmdDiary(palace, args) {
+async function cmdDiary(kg, structure, args) {
     // Usage: diary <agent-name> [write|read] [content]
     const agent = args[0];
     const action = args[1] ?? 'read';
@@ -262,12 +264,12 @@ async function cmdDiary(palace, args) {
         const content = args.slice(2).join(' ');
         if (!content)
             throw new Error('Usage: athenamem diary <agent> write <content>');
-        palace.getOrCreateRoom(agent, 'diary');
-        palace.addDrawer(agent, 'diary', 'discoveries', `diary-${Date.now()}.md`, content);
+        structure.getOrCreateSection(agent, 'diary');
+        structure.addEntry(agent, 'diary', 'discoveries', `diary-${Date.now()}.md`, content);
         console.log(`✅ Diary entry written for ${agent}`);
     }
     else {
-        const memories = palace['kg'].getMemoriesByPalace(agent, 'diary');
+        const memories = kg.getMemoriesByStructure(agent, 'diary');
         if (memories.length === 0) {
             console.log(`No diary entries for ${agent}.`);
             return;
@@ -287,7 +289,7 @@ async function cmdAudit(kg) {
     }
     console.log(`⚠️  ${contradictions} contradiction(s) flagged. Run "athenamem recall" to review.`);
 }
-async function cmdCompact(kg, palace, workDir) {
+async function cmdCompact(kg, structure, workDir) {
     console.log('Running compaction...');
     // TODO: wire in CompactionEngine
     console.log('✅ Compaction scheduled (not yet wired to LLM).');
@@ -310,14 +312,19 @@ async function cmdImport(kg, args) {
     kg.import(data);
     console.log(`✅ Imported from ${inPath}`);
 }
-async function cmdTunnel(palace, args) {
+async function cmdBridge(structure, args) {
     const from = args[0];
     const to = args[1];
-    const roomName = args[2];
-    if (!from || !to || !roomName)
-        throw new Error('Usage: athenamem tunnel <from-wing> <to-wing> <room-name>');
-    const tunnel = palace.createTunnel(from, to, roomName);
-    console.log(`✅ Created tunnel: ${from} --[${roomName}]--> ${to}`);
+    const sectionName = args[2];
+    if (!from || !to || !sectionName)
+        throw new Error('Usage: athenamem bridge <from-module> <to-module> <section-name>');
+    const bridge = structure.createBridge(from, to, sectionName);
+    console.log(`✅ Created bridge: ${from} --[${sectionName}]--> ${to}`);
+}
+async function cmdRebuildFTS(kg) {
+    console.log('Rebuilding FTS index...');
+    kg.rebuildFTSIndex();
+    console.log('✅ FTS index rebuilt');
 }
 // ─── Help ──────────────────────────────────────────────────────────────────────
 function printHelp(topic) {
@@ -328,31 +335,32 @@ Usage: athenamem <command> [options]
 
 Commands:
   init [name]           Initialize workspace
-  status                Show palace overview + KG stats
+  status                Show structure overview + KG stats
   wake                  Load context (for agent bootstrap)
   checkpoint            Save WAL checkpoint
   sleep [summary]       End session
-  remember <w> <r>       Store a memory (see help remember)
+  remember <m> <s>       Store a memory (see help remember)
   recall <query>        Deep search across all systems
   search <query>        Quick search (qmd + KG)
-  wings [list|add]      Manage wings
-  rooms <wing>          List rooms in a wing
+  rebuild-fts           Rebuild FTS search index
+  modules [list|add]    Manage modules
+  sections <module>     List sections in a module
   diary <agent> [write] Read/write agent diary
   audit                 Check for contradictions
   stats                 KG statistics
   export [file]          Export KG as JSON
   import <file>         Import KG from JSON
-  tunnel <f> <t> <room> Create cross-wing tunnel
+  bridge <f> <t> <sec>  Create cross-module bridge
 
 Run "athenamem help <command>" for detailed help.`,
-        remember: `Usage: athenamem remember <wing> <room> [options]
+        remember: `Usage: athenamem remember <module> <section> [options]
 
 Options:
   --content "text"      Required. The memory content to store.
-  --hall <type>         Hall type: facts|events|discoveries|preferences|advice (default: facts)
+  --category <type>      Category type: facts|events|discoveries|preferences|advice (default: facts)
 
 Example:
-  athenamem remember chris memory-stack --content "Using SQLite for the KG" --hall discoveries`,
+  athenamem remember chris memory-stack --content "Using SQLite for the KG" --category discoveries`,
         recall: `Usage: athenamem recall <query> [options]
 
 Fires queries across all configured memory systems (qmd, ClawVault,
@@ -361,16 +369,16 @@ Reciprocal Rank Fusion.
 
 Example:
   athenamem recall "why did we switch databases"`,
-        wings: `Usage: athenamem wings [list|add] [options]
+        modules: `Usage: athenamem modules [list|add] [options]
 
-list (default):  List all wings
-add <name>:     Create a new wing
+list (default):  List all modules
+add <name>:     Create a new module
 
 Options for add:
-  --desc "text"  Wing description
+  --desc "text"  Module description
 
 Example:
-  athenamem wings add chris --desc "Chris's personal memory wing"`,
+  athenamem modules add chris --desc "Chris's personal memory module"`,
     };
     console.log(help[topic ?? ''] ?? help['']);
 }

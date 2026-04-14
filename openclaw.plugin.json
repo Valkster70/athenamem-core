@@ -1,8 +1,8 @@
 {
   "id": "athenamem-core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "name": "AthenaMem Core",
-  "description": "Biomimetic memory stack — palace architecture, WAL enforcement, contradiction detection, DAG compaction, cross-system recall.",
+  "description": "Biomimetic memory stack — structure architecture (modules, sections, vaults, entries), WAL enforcement, contradiction detection, DAG compaction, cross-system recall.",
   "openclaw": {
     "version": ">=2026.3.24-beta.2"
   },
@@ -14,37 +14,37 @@
     "properties": {
       "dataDir": {
         "type": "string",
-        "description": "Directory for AthenaMem data storage"
+        "description": "Directory for AthenaMem Core data storage"
       },
-      "palaceMode": {
+      "structureMode": {
         "type": "boolean",
-        "description": "Enable palace architecture mode",
+        "description": "Enable structure architecture mode",
         "default": true
       }
     }
   },
   "tools": [
-    "athenamem_status",
-    "athenamem_list_wings",
-    "athenamem_list_rooms",
-    "athenamem_search",
-    "athenamem_get_aaak_spec",
-    "athenamem_add_drawer",
-    "athenamem_delete_drawer",
-    "athenamem_kg_query",
-    "athenamem_kg_add",
-    "athenamem_kg_invalidate",
-    "athenamem_kg_timeline",
-    "athenamem_check_facts",
-    "athenamem_resolve_conflict",
-    "athenamem_diary_write",
-    "athenamem_diary_read",
-    "athenamem_traverse",
-    "athenamem_find_tunnels",
-    "athenamem_recall",
-    "athenamem_quick_search",
-    "athenamem_create_wing",
-    "athenamem_create_room"
+    "athenamem_core_create_wing",
+    "athenamem_core_create_room",
+    "athenamem_core_status",
+    "athenamem_core_list_modules",
+    "athenamem_core_list_sections",
+    "athenamem_core_search",
+    "athenamem_core_get_aaak_spec",
+    "athenamem_core_add_entry",
+    "athenamem_core_delete_entry",
+    "athenamem_core_kg_query",
+    "athenamem_core_kg_add",
+    "athenamem_core_kg_invalidate",
+    "athenamem_core_kg_timeline",
+    "athenamem_core_check_facts",
+    "athenamem_core_resolve_conflict",
+    "athenamem_core_diary_write",
+    "athenamem_core_diary_read",
+    "athenamem_core_traverse",
+    "athenamem_core_find_bridges",
+    "athenamem_core_recall",
+    "athenamem_core_quick_search"
   ],
   "hooks": {
     "before_agent_start": "Session bootstrap + setSession binding",

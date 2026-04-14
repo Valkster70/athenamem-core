@@ -1,11 +1,7 @@
 node_modules/
 dist/
-data/
-palace/
 *.log
-*.db
-*.db-shm
-*.db-wal
 .DS_Store
-.env
-config.json
+*.db
+*.db-journal
+data/

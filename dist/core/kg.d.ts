@@ -1,11 +1,11 @@
 /**
- * AthenaMem Knowledge Graph
+ * AthenaMem Core Knowledge Graph
  *
  * Temporal entity-relation graph with validity windows.
  * Inspired by MemPalace's KG + Hindsight's biomimetic structure.
  *
  * Entities have validity windows — queries can ask "what was true at time X?"
- * Every fact is traceable to a source drawer.
+ * Every fact is traceable to a source entry.
  */
 import { z } from 'zod';
 export declare const EntityTypeSchema: z.ZodEnum<["person", "project", "topic", "decision", "lesson", "event", "preference", "agent"]>;
@@ -14,8 +14,8 @@ export declare const PredicateSchema: z.ZodEnum<["works_on", "decided", "prefers
 export type Predicate = z.infer<typeof PredicateSchema>;
 export declare const MemoryTypeSchema: z.ZodEnum<["conversation", "decision", "lesson", "event", "preference", "fact", "discovery", "advice"]>;
 export type MemoryType = z.infer<typeof MemoryTypeSchema>;
-export declare const HallTypeSchema: z.ZodEnum<["facts", "events", "discoveries", "preferences", "advice"]>;
-export type HallType = z.infer<typeof HallTypeSchema>;
+export declare const CategoryTypeSchema: z.ZodEnum<["facts", "events", "discoveries", "preferences", "advice"]>;
+export type CategoryType = z.infer<typeof CategoryTypeSchema>;
 export interface Entity {
     id: string;
     name: string;
@@ -38,12 +38,12 @@ export interface Relation {
 }
 export interface Memory {
     id: string;
-    drawer_id: string;
+    entry_id: string;
     content: string;
     summary: string | null;
     memory_type: MemoryType;
-    room: string;
-    wing: string;
+    section: string;
+    module: string;
     importance: number;
     contradiction_flag: boolean;
     contradiction_with: string | null;
@@ -55,11 +55,21 @@ export interface Drawer {
     drawer_id: string;
     wing: string;
     room: string;
-    hall: HallType;
+    hall: CategoryType;
     file_path: string;
     content_hash: string;
     created_at: number;
 }
+export interface Entry {
+    entry_id: string;
+    module: string;
+    section: string;
+    category: CategoryType;
+    file_path: string;
+    content_hash: string;
+    created_at: number;
+}
+export type HallType = CategoryType;
 export interface TemporalQuery {
     entity_id?: string;
     as_of?: number;
@@ -69,7 +79,7 @@ export interface KGStats {
     entity_count: number;
     relation_count: number;
     memory_count: number;
-    drawer_count: number;
+    entry_count: number;
     active_entities: number;
     contradictions: number;
 }
@@ -113,17 +123,28 @@ export declare class KnowledgeGraph {
         incoming: Relation[];
     };
     /**
-     * Store a memory item, linked to a drawer.
+     * Store a memory item, linked to an entry.
      */
-    addMemory(drawerId: string, content: string, memoryType: MemoryType, room: string, wing: string, summary?: string | null, importance?: number): Memory;
+    addMemory(entryId: string, content: string, memoryType: MemoryType, section: string, module: string, summary?: string | null, importance?: number): Memory;
     /**
      * Search memories using FTS5.
+     * Falls back to LIKE query if FTS returns no results.
      */
-    searchMemories(query: string, wing?: string, room?: string, limit?: number): Memory[];
+    searchMemories(query: string, module?: string, section?: string, limit?: number): Memory[];
     /**
-     * Get memories by wing and room (palace navigation).
+     * Rebuild the FTS5 index from scratch.
+     * Use when FTS is out of sync or returning no results.
      */
-    getMemoriesByPalace(wing: string, room?: string, hall?: HallType): Memory[];
+    rebuildFTSIndex(): void;
+    /**
+     * Get memories by module and section (structure navigation).
+     */
+    getMemoriesByStructure(module: string, section?: string, category?: CategoryType): Memory[];
+    /**
+     * Legacy method: Get memories by wing and room (palace navigation).
+     * Maps to new structure terminology.
+     */
+    getMemoriesByPalace(wing: string, room?: string, hall?: CategoryType): Memory[];
     /**
      * Mark a memory as contradictory.
      */
@@ -133,11 +154,19 @@ export declare class KnowledgeGraph {
      */
     recordAccess(memoryId: string): void;
     /**
-     * Register a drawer (a file containing verbatim content).
+     * Register an entry (a file containing verbatim content).
      */
-    addDrawer(wing: string, room: string, hall: HallType, filePath: string, contentHash: string): Drawer;
+    addEntry(module: string, section: string, category: CategoryType, filePath: string, contentHash: string): Entry;
     /**
-     * Get drawer by path.
+     * Legacy method: Register a drawer (maps to entry).
+     */
+    addDrawer(wing: string, room: string, hall: CategoryType, filePath: string, contentHash: string): Drawer;
+    /**
+     * Get entry by path.
+     */
+    getEntry(filePath: string): Entry | null;
+    /**
+     * Legacy method: Get drawer by path.
      */
     getDrawer(filePath: string): Drawer | null;
     /**
@@ -161,6 +190,7 @@ export declare class KnowledgeGraph {
         entities: Entity[];
         relations: Relation[];
         memories: Memory[];
+        entries: Entry[];
         drawers: Drawer[];
     };
     /**
@@ -170,7 +200,8 @@ export declare class KnowledgeGraph {
         entities: Entity[];
         relations: Relation[];
         memories: Memory[];
-        drawers: Drawer[];
+        entries?: Entry[];
+        drawers?: Drawer[];
     }): void;
 }
 //# sourceMappingURL=kg.d.ts.map

@@ -1,5 +1,5 @@
 /**
- * AthenaMem Search Orchestrator
+ * AthenaMem Core Search Orchestrator
  * 
  * When a recall request comes in, this fires queries across all active systems
  * in parallel, then fuses results using Reciprocal Rank Fusion (RRF).
@@ -15,7 +15,7 @@
  */
 
 import { KnowledgeGraph } from '../core/kg.js';
-import { Palace } from '../core/palace.js';
+import { Structure } from '../core/structure.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -26,25 +26,25 @@ export interface SearchResult {
   source_name: string;      // e.g., "qmd", "ClawVault/decisions"
   score: number;           // 0-1, fused score
   rank?: number;           // optional — assigned post-fusion after fusion
-  wing?: string;
-  room?: string;
+  module?: string;
+  section?: string;
   memory_type?: string;
   access_count?: number;
   timestamp?: number;
   url?: string;            // for file-based results
-  drawer_id?: string;
+  entry_id?: string;
 }
 
 export type SearchSource = 'qmd' | 'clawvault' | 'hindsight' | 'mnemo' | 'kg' | 'athenamem';
 
 export interface SearchOptions {
   query: string;
-  wing?: string;            // filter to wing
-  room?: string;            // filter to room
+  module?: string;            // filter to module
+  section?: string;            // filter to section
   sources?: SearchSource[]; // which systems to query (default: all)
   limit?: number;           // max results (default: 20)
   fuseK?: number;           // RRF k parameter (default: 60)
-  minScore?: number;        // minimum fused score (default: 0.01)
+  minScore?: number;        // minimum fused score (default: 0.1)
   includeArchived?: boolean; // include cold/archival storage
 }
 
@@ -97,7 +97,7 @@ function reciprocalRankFusion(
 
 export class SearchOrchestrator {
   private kg: KnowledgeGraph;
-  private palace: Palace;
+  private structure: Structure;
   private qmdPath: string;
   private clawvaultPath: string;
   private hindsightUrl: string;
@@ -105,7 +105,7 @@ export class SearchOrchestrator {
 
   constructor(
     kg: KnowledgeGraph,
-    palace: Palace,
+    structure: Structure,
     opts: {
       qmdPath?: string;
       clawvaultPath?: string;
@@ -114,7 +114,7 @@ export class SearchOrchestrator {
     } = {}
   ) {
     this.kg = kg;
-    this.palace = palace;
+    this.structure = structure;
     this.qmdPath = opts.qmdPath ?? `${process.env.HOME}/.cache/qmd`;
     this.clawvaultPath = opts.clawvaultPath ?? `${process.env.HOME}/.openclaw/workspace/memory`;
     this.hindsightUrl = opts.hindsightUrl ?? 'http://127.0.0.1:8888';
@@ -130,12 +130,12 @@ export class SearchOrchestrator {
     const start = Date.now();
     const {
       query,
-      wing,
-      room,
+      module,
+      section,
       sources,
       limit = 20,
       fuseK = 60,
-      minScore = 0.01,  // 1/(60+1) ≈ 0.016 for single rank-1 result
+      minScore = 0.01,
     } = options;
 
     const allSources: SearchSource[] = sources ?? ['qmd', 'clawvault', 'hindsight', 'mnemo', 'kg'];
@@ -144,10 +144,9 @@ export class SearchOrchestrator {
     // Fire all system queries in parallel
     const queries: Promise<SearchResult[]>[] = [];
     const sourceMap: SearchSource[] = [];
-    const resultsById = new Map<string, SearchResult>();
 
     for (const source of allSources) {
-      queries.push(this.querySystem(source, query, wing, room, limit));
+      queries.push(this.querySystem(source, query, module, section, limit));
       sourceMap.push(source);
     }
 
@@ -163,7 +162,6 @@ export class SearchOrchestrator {
         const res = outcome.value;
         details[source] = { results_count: res.length, query_ms: 0 };
         if (res.length > 0) sourcesWithResults.push(source);
-        for (const r of res) { resultsById.set(r.id, r); }
         rankedLists.push(this.toRankedMap(res));
       } else {
         details[source] = { results_count: 0, query_ms: 0, error: String(outcome.reason) };
@@ -179,19 +177,10 @@ export class SearchOrchestrator {
       if (score < minScore) continue;
 
       // Find the best-scoring result for this ID across all systems
-      let best: SearchResult | null = null;
-      for (const list of rankedLists) {
-        const entry = list.get(id);
-        if (entry) {
-          const res = resultsById.get(id);
-          if (res && (!best || entry.score > (best.score ?? 0))) {
-            best = res;
-          }
-        }
-      }
-      if (best) {
-        best.score = score;
-        allResults.push(best);
+      const res = this.findResultById(rankedLists, id);
+      if (res) {
+        res.score = score;
+        allResults.push(res);
       }
     }
 
@@ -220,21 +209,21 @@ export class SearchOrchestrator {
   private async querySystem(
     source: SearchSource,
     query: string,
-    wing?: string,
-    room?: string,
+    module?: string,
+    section?: string,
     limit: number = 20
   ): Promise<SearchResult[]> {
     switch (source) {
       case 'qmd':
         return this.queryQmd(query, limit);
       case 'clawvault':
-        return this.queryClawVault(query, wing, room, limit);
+        return this.queryClawVault(query, module, section, limit);
       case 'hindsight':
         return this.queryHindsight(query, limit);
       case 'mnemo':
         return this.queryMnemo(query, limit);
       case 'kg':
-        return this.queryKG(query, wing, room, limit);
+        return this.queryKG(query, module, section, limit);
       default:
         return [];
     }
@@ -275,8 +264,8 @@ export class SearchOrchestrator {
 
   private async queryClawVault(
     query: string,
-    wing?: string,
-    room?: string,
+    module?: string,
+    section?: string,
     limit: number = 20
   ): Promise<SearchResult[]> {
     try {
@@ -294,7 +283,7 @@ export class SearchOrchestrator {
         const file = line.substring(0, colonIdx);
         const content = line.substring(colonIdx + 1).trim();
 
-        // Extract wing/room from path
+        // Extract module/section from path
         const parts = file.replace(this.clawvaultPath, '').split('/').filter(Boolean);
         results.push({
           id: `clawvault:${file}`,
@@ -302,8 +291,8 @@ export class SearchOrchestrator {
           source: 'clawvault',
           source_name: `ClawVault/${parts.slice(0, 2).join('/')}`,
           score: 0.5,
-          wing: parts[0],
-          room: parts[1],
+          module: parts[0],
+          section: parts[1],
         });
       }
 
@@ -367,25 +356,25 @@ export class SearchOrchestrator {
 
   private async queryKG(
     query: string,
-    wing?: string,
-    room?: string,
+    module?: string,
+    section?: string,
     limit: number = 20
   ): Promise<SearchResult[]> {
     // KG search uses FTS on memories
-    const memories = this.kg.searchMemories(query, wing, room, limit);
+    const memories = this.kg.searchMemories(query, module, section, limit);
 
     return memories.map(m => ({
       id: `kg:${m.id}`,
       content: m.content,
       source: 'kg' as SearchSource,
-      source_name: `AthenaMem KG/${m.wing}/${m.room}`,
+      source_name: `AthenaMem KG/${m.module}/${m.section}`,
       score: 0.5,
-      wing: m.wing,
-      room: m.room,
+      module: m.module,
+      section: m.section,
       memory_type: m.memory_type,
       access_count: m.access_count,
       timestamp: m.created_at,
-      drawer_id: m.drawer_id,
+      entry_id: m.entry_id,
     }));
   }
 
@@ -404,21 +393,16 @@ export class SearchOrchestrator {
     for (const list of rankedLists) {
       const entry = list.get(id);
       if (entry) {
-        // We need to find the original result — stored in the map key
-        for (const [key, val] of list) {
-          if (key === id) {
-            // Can't easily recover original result from here without storing it
-            // Return a placeholder — will be refined
-            return {
-              id,
-              content: '',
-              source: entry.source,
-              source_name: entry.source,
-              score: entry.score,
-              rank: entry.rank,
-            };
-          }
-        }
+        // Can't easily recover original result from here without storing it
+        // Return a placeholder — will be refined
+        return {
+          id,
+          content: '',
+          source: entry.source,
+          source_name: entry.source,
+          score: entry.score,
+          rank: entry.rank,
+        };
       }
     }
     return null;
@@ -433,7 +417,7 @@ export class SearchOrchestrator {
       query,
       sources: ['qmd', 'kg'],
       limit,
-      minScore: 0.15,
+      minScore: 0.01,
     });
     return response.results;
   }
@@ -473,9 +457,9 @@ export function formatSearchResults(response: SearchResponse): string {
 
   for (const result of response.results) {
     const icon = sourceColors[result.source] ?? '•';
-    const wingRoom = result.wing ? `[${result.wing}/${result.room ?? 'root'}] ` : '';
+    const moduleSection = result.module ? `[${result.module}/${result.section ?? 'root'}] ` : '';
     lines.push(`${icon} **Rank #${result.rank}** — ${result.source_name} (score: ${result.score.toFixed(3)})`);
-    lines.push(`   ${wingRoom}${result.content.substring(0, 200)}${result.content.length > 200 ? '...' : ''}`);
+    lines.push(`   ${moduleSection}${result.content.substring(0, 200)}${result.content.length > 200 ? '...' : ''}`);
     lines.push('');
   }
 

@@ -1,5 +1,5 @@
 /**
- * AthenaMem Search Orchestrator
+ * AthenaMem Core Search Orchestrator
  *
  * When a recall request comes in, this fires queries across all active systems
  * in parallel, then fuses results using Reciprocal Rank Fusion (RRF).
@@ -38,14 +38,14 @@ function reciprocalRankFusion(rankedLists, k = 60) {
 // ─── SearchOrchestrator Class ─────────────────────────────────────────────────
 export class SearchOrchestrator {
     kg;
-    palace;
+    structure;
     qmdPath;
     clawvaultPath;
     hindsightUrl;
     mnemoUrl;
-    constructor(kg, palace, opts = {}) {
+    constructor(kg, structure, opts = {}) {
         this.kg = kg;
-        this.palace = palace;
+        this.structure = structure;
         this.qmdPath = opts.qmdPath ?? `${process.env.HOME}/.cache/qmd`;
         this.clawvaultPath = opts.clawvaultPath ?? `${process.env.HOME}/.openclaw/workspace/memory`;
         this.hindsightUrl = opts.hindsightUrl ?? 'http://127.0.0.1:8888';
@@ -57,16 +57,14 @@ export class SearchOrchestrator {
      */
     async search(options) {
         const start = Date.now();
-        const { query, wing, room, sources, limit = 20, fuseK = 60, minScore = 0.01, // 1/(60+1) ≈ 0.016 for single rank-1 result
-         } = options;
+        const { query, module, section, sources, limit = 20, fuseK = 60, minScore = 0.01, } = options;
         const allSources = sources ?? ['qmd', 'clawvault', 'hindsight', 'mnemo', 'kg'];
         const details = {};
         // Fire all system queries in parallel
         const queries = [];
         const sourceMap = [];
-        const resultsById = new Map();
         for (const source of allSources) {
-            queries.push(this.querySystem(source, query, wing, room, limit));
+            queries.push(this.querySystem(source, query, module, section, limit));
             sourceMap.push(source);
         }
         const results = await Promise.allSettled(queries);
@@ -80,9 +78,6 @@ export class SearchOrchestrator {
                 details[source] = { results_count: res.length, query_ms: 0 };
                 if (res.length > 0)
                     sourcesWithResults.push(source);
-                for (const r of res) {
-                    resultsById.set(r.id, r);
-                }
                 rankedLists.push(this.toRankedMap(res));
             }
             else {
@@ -97,19 +92,10 @@ export class SearchOrchestrator {
             if (score < minScore)
                 continue;
             // Find the best-scoring result for this ID across all systems
-            let best = null;
-            for (const list of rankedLists) {
-                const entry = list.get(id);
-                if (entry) {
-                    const res = resultsById.get(id);
-                    if (res && (!best || entry.score > (best.score ?? 0))) {
-                        best = res;
-                    }
-                }
-            }
-            if (best) {
-                best.score = score;
-                allResults.push(best);
+            const res = this.findResultById(rankedLists, id);
+            if (res) {
+                res.score = score;
+                allResults.push(res);
             }
         }
         // Sort by fused score, apply limit
@@ -130,18 +116,18 @@ export class SearchOrchestrator {
         };
     }
     // ─── Per-System Queries ─────────────────────────────────────────────────────
-    async querySystem(source, query, wing, room, limit = 20) {
+    async querySystem(source, query, module, section, limit = 20) {
         switch (source) {
             case 'qmd':
                 return this.queryQmd(query, limit);
             case 'clawvault':
-                return this.queryClawVault(query, wing, room, limit);
+                return this.queryClawVault(query, module, section, limit);
             case 'hindsight':
                 return this.queryHindsight(query, limit);
             case 'mnemo':
                 return this.queryMnemo(query, limit);
             case 'kg':
-                return this.queryKG(query, wing, room, limit);
+                return this.queryKG(query, module, section, limit);
             default:
                 return [];
         }
@@ -176,7 +162,7 @@ export class SearchOrchestrator {
             return [];
         }
     }
-    async queryClawVault(query, wing, room, limit = 20) {
+    async queryClawVault(query, module, section, limit = 20) {
         try {
             const { execSync } = require('child_process');
             const grepQuery = query.replace(/"/g, '\\"').replace(/'/g, "'\"'\"'");
@@ -190,7 +176,7 @@ export class SearchOrchestrator {
                     continue;
                 const file = line.substring(0, colonIdx);
                 const content = line.substring(colonIdx + 1).trim();
-                // Extract wing/room from path
+                // Extract module/section from path
                 const parts = file.replace(this.clawvaultPath, '').split('/').filter(Boolean);
                 results.push({
                     id: `clawvault:${file}`,
@@ -198,8 +184,8 @@ export class SearchOrchestrator {
                     source: 'clawvault',
                     source_name: `ClawVault/${parts.slice(0, 2).join('/')}`,
                     score: 0.5,
-                    wing: parts[0],
-                    room: parts[1],
+                    module: parts[0],
+                    section: parts[1],
                 });
             }
             return results;
@@ -258,21 +244,21 @@ export class SearchOrchestrator {
             return [];
         }
     }
-    async queryKG(query, wing, room, limit = 20) {
+    async queryKG(query, module, section, limit = 20) {
         // KG search uses FTS on memories
-        const memories = this.kg.searchMemories(query, wing, room, limit);
+        const memories = this.kg.searchMemories(query, module, section, limit);
         return memories.map(m => ({
             id: `kg:${m.id}`,
             content: m.content,
             source: 'kg',
-            source_name: `AthenaMem KG/${m.wing}/${m.room}`,
+            source_name: `AthenaMem KG/${m.module}/${m.section}`,
             score: 0.5,
-            wing: m.wing,
-            room: m.room,
+            module: m.module,
+            section: m.section,
             memory_type: m.memory_type,
             access_count: m.access_count,
             timestamp: m.created_at,
-            drawer_id: m.drawer_id,
+            entry_id: m.entry_id,
         }));
     }
     // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -288,21 +274,16 @@ export class SearchOrchestrator {
         for (const list of rankedLists) {
             const entry = list.get(id);
             if (entry) {
-                // We need to find the original result — stored in the map key
-                for (const [key, val] of list) {
-                    if (key === id) {
-                        // Can't easily recover original result from here without storing it
-                        // Return a placeholder — will be refined
-                        return {
-                            id,
-                            content: '',
-                            source: entry.source,
-                            source_name: entry.source,
-                            score: entry.score,
-                            rank: entry.rank,
-                        };
-                    }
-                }
+                // Can't easily recover original result from here without storing it
+                // Return a placeholder — will be refined
+                return {
+                    id,
+                    content: '',
+                    source: entry.source,
+                    source_name: entry.source,
+                    score: entry.score,
+                    rank: entry.rank,
+                };
             }
         }
         return null;
@@ -316,7 +297,7 @@ export class SearchOrchestrator {
             query,
             sources: ['qmd', 'kg'],
             limit,
-            minScore: 0.15,
+            minScore: 0.01,
         });
         return response.results;
     }
@@ -351,9 +332,9 @@ export function formatSearchResults(response) {
     };
     for (const result of response.results) {
         const icon = sourceColors[result.source] ?? '•';
-        const wingRoom = result.wing ? `[${result.wing}/${result.room ?? 'root'}] ` : '';
+        const moduleSection = result.module ? `[${result.module}/${result.section ?? 'root'}] ` : '';
         lines.push(`${icon} **Rank #${result.rank}** — ${result.source_name} (score: ${result.score.toFixed(3)})`);
-        lines.push(`   ${wingRoom}${result.content.substring(0, 200)}${result.content.length > 200 ? '...' : ''}`);
+        lines.push(`   ${moduleSection}${result.content.substring(0, 200)}${result.content.length > 200 ? '...' : ''}`);
         lines.push('');
     }
     return lines.join('\n');

@@ -37,7 +37,7 @@ export declare class CompactionEngine {
     constructor(kg: KnowledgeGraph, compactionDir: string, llm: LLMCompiler);
     private loadNodes;
     private saveNodes;
-    compact(sourceIds: string[], level: 1 | 2 | 3, wing: string, room: string): Promise<CompactionResult>;
+    compact(sourceIds: string[], level: 1 | 2 | 3, module: string, section: string): Promise<CompactionResult>;
     expand(nodeId: string, depth?: number, maxDepth?: number): {
         content: string;
         sources: {

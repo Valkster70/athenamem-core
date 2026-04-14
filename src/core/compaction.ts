@@ -90,8 +90,8 @@ export class CompactionEngine {
   async compact(
     sourceIds: string[],
     level: 1 | 2 | 3,
-    wing: string,
-    room: string
+    module: string,
+    section: string
   ): Promise<CompactionResult> {
     if (level < 1 || level > 3) {
       throw new Error('Compaction level must be 1, 2, or 3');
@@ -203,7 +203,7 @@ export class CompactionEngine {
     const byLocation = new Map<string, Memory[]>();
 
     for (const m of memories) {
-      const key = `${m.wing}::${m.room}`;
+      const key = `${m.module}::${m.section}`;
       if (!byLocation.has(key)) byLocation.set(key, []);
       byLocation.get(key)!.push(m);
     }

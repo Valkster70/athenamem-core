@@ -1,5 +1,5 @@
 /**
- * AthenaMem Search Orchestrator
+ * AthenaMem Core Search Orchestrator
  *
  * When a recall request comes in, this fires queries across all active systems
  * in parallel, then fuses results using Reciprocal Rank Fusion (RRF).
@@ -14,7 +14,7 @@
  * Results are fused, deduplicated, and optionally reranked by LLM.
  */
 import { KnowledgeGraph } from '../core/kg.js';
-import { Palace } from '../core/palace.js';
+import { Structure } from '../core/structure.js';
 export interface SearchResult {
     id: string;
     content: string;
@@ -22,19 +22,19 @@ export interface SearchResult {
     source_name: string;
     score: number;
     rank?: number;
-    wing?: string;
-    room?: string;
+    module?: string;
+    section?: string;
     memory_type?: string;
     access_count?: number;
     timestamp?: number;
     url?: string;
-    drawer_id?: string;
+    entry_id?: string;
 }
 export type SearchSource = 'qmd' | 'clawvault' | 'hindsight' | 'mnemo' | 'kg' | 'athenamem';
 export interface SearchOptions {
     query: string;
-    wing?: string;
-    room?: string;
+    module?: string;
+    section?: string;
     sources?: SearchSource[];
     limit?: number;
     fuseK?: number;
@@ -58,12 +58,12 @@ export interface SearchResponse {
 }
 export declare class SearchOrchestrator {
     private kg;
-    private palace;
+    private structure;
     private qmdPath;
     private clawvaultPath;
     private hindsightUrl;
     private mnemoUrl;
-    constructor(kg: KnowledgeGraph, palace: Palace, opts?: {
+    constructor(kg: KnowledgeGraph, structure: Structure, opts?: {
         qmdPath?: string;
         clawvaultPath?: string;
         hindsightUrl?: string;

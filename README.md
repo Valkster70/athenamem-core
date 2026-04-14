@@ -6,7 +6,7 @@ A biomimetic memory stack for AI agents — built on the principle that memory i
 
 AthenaMem draws from the best ideas in the memory systems landscape — Palace architecture, WAL durability, DAG compaction, multi-strategy retrieval, contradiction detection — and synthesizes them into something that feels less like a database and more like an actual brain.
 
-**Built by Chris Valk** as a personal project to create the memory system he's been looking for.
+**Built as a personal project** to create the memory system that doesn't exist yet.
 
 ---
 
@@ -87,10 +87,24 @@ Current status:
 - ✅ Compaction engine (DAG-based)
 - ✅ Search orchestrator (RRF fusion)
 - ✅ CLI
-- 🔨 Research documents (via OpenFang)
-- ⏳ MCP server + OpenClaw plugin
+- ✅ MCP server + OpenClaw plugin
 - ⏳ Specialist agents + diaries
-- ⏳ OpenFang research automation
+
+---
+
+## Status
+
+**Under active development.** The core modules are scaffolded and the architecture is defined. See `SPEC.md` for the full roadmap.
+
+Current status:
+- ✅ Core KG (SQLite with temporal validity)
+- ✅ WAL enforcement
+- ✅ Contradiction detection engine
+- ✅ Palace structure (wings/rooms/closets/drawers)
+- ✅ Compaction engine (DAG-based)
+- ✅ Search orchestrator (RRF fusion)
+- ✅ CLI
+
 
 ---
 
@@ -125,7 +139,7 @@ athenamem search "database decision"
 
 - [SPEC.md](SPEC.md) — Full architecture specification
 - [docs/architecture.md](docs/architecture/) — Detailed design docs
-- [docs/research/](docs/research/) — OpenFang research on reference systems
+- [docs/research/](docs/research/) — Research on reference systems
 
 ---
 
@@ -133,13 +147,12 @@ athenamem search "database decision"
 
 - **TypeScript** + **Node.js** (Python migration path for PyO3 later)
 - **SQLite** with `better-sqlite3` (WAL mode, FTS5)
-- **OpenFang** researcher agent (continuous research on dependencies)
 - **Reciprocal Rank Fusion** for cross-system query fusion
 
 ---
 
 ## Contributing
 
-This is a personal project by Chris Valk. Ideas and feedback welcome — this is a passion project to build the memory system that doesn't exist yet.
+This is a passion project to build the memory system that doesn't exist yet.
 
-If you're interested in the direction, reach out.
+Ideas and feedback welcome.
