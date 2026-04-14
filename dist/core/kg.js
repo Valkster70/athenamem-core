@@ -160,7 +160,7 @@ export class KnowledgeGraph {
       CREATE INDEX IF NOT EXISTS idx_memories_module_section ON memories(module, section);
       CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
       CREATE INDEX IF NOT EXISTS idx_memories_contradiction ON memories(contradiction_flag) WHERE contradiction_flag = 1;
-      CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';
+      -- idx_memories_status created in migrate() after column is added
       CREATE INDEX IF NOT EXISTS idx_entries_module ON entries(module);
       CREATE INDEX IF NOT EXISTS idx_drawers_wing ON drawers(wing);
     `);
