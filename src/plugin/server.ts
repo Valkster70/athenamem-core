@@ -23,6 +23,7 @@ import { CompactionEngine, RuleBasedCompiler } from '../core/compaction.js';
 import { SearchOrchestrator, SearchResult, SearchResponse } from '../search/orchestrator.js';
 import { MemoryEvent, CategoryType, MemorySource } from '../core/event.js';
 import { ingestMemoryEvent, IngestionResult } from '../core/ingestion.js';
+import { traceMemory, explainRecall } from '../core/debug.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -670,4 +671,103 @@ export async function toolCreateWing(wingName: string, description?: string): Pr
 export async function toolCreateRoom(wingName: string, roomName: string, description?: string): Promise<Room> {
   const { palace } = getContext();
   return palace.createRoom(wingName, roomName, description ?? '');
+}
+
+// ─── Debug Tools (Phase 4) ─────────────────────────────────────────────────────
+
+/**
+ * athenamem_trace_memory — full audit trail of a memory.
+ */
+export async function toolTraceMemory(memoryId: string): Promise<{
+  found: boolean;
+  trace?: {
+    memory: Memory;
+    entry: { file_path: string; content_hash: string } | null;
+    facts: number;
+    contradictions: number;
+    lifecycle: {
+      created: number;
+      last_accessed: number | null;
+      access_count: number;
+      status: string;
+    };
+  };
+  error?: string;
+}> {
+  const c = getContext();
+  const trace = await traceMemory(memoryId, c.kg, c.palace, c.wal);
+  
+  if (!trace) {
+    return { found: false, error: `Memory ${memoryId} not found` };
+  }
+  
+  return {
+    found: true,
+    trace: {
+      memory: trace.memory,
+      entry: trace.entry,
+      facts: trace.facts.length,
+      contradictions: trace.contradictions.length,
+      lifecycle: trace.lifecycle,
+    },
+  };
+}
+
+/**
+ * athenamem_explain_recall — why did these memories rank here?
+ */
+export async function toolExplainRecall(
+  query: string,
+  resultMemoryIds: string[]
+): Promise<{
+  query: string;
+  explanation: {
+    memory_count: number;
+    filters_applied: string[];
+    top_memories: Array<{
+      rank: number;
+      memory_id: string;
+      score: number;
+      salience: number;
+      valid: boolean;
+      contradicted: boolean;
+      why_ranked: string[];
+    }>;
+  };
+}> {
+  const c = getContext();
+  
+  // Get full memory objects
+  const memories: Array<{ memory: Memory; score: number; sourceScores: Record<string, number>; matched_keywords: string[] }> = [];
+  
+  for (const id of resultMemoryIds) {
+    const memory = c.kg.getMemory(id);
+    if (memory) {
+      memories.push({
+        memory,
+        score: memory.importance,
+        sourceScores: { athenamem: memory.importance },
+        matched_keywords: [], // Would need to track from search
+      });
+    }
+  }
+  
+  const explanation = explainRecall(query, memories);
+  
+  return {
+    query,
+    explanation: {
+      memory_count: memories.length,
+      filters_applied: explanation.filters_applied,
+      top_memories: explanation.top_results.slice(0, 5).map(r => ({
+        rank: r.rank,
+        memory_id: r.memory_id,
+        score: r.final_score,
+        salience: r.salience,
+        valid: r.valid,
+        contradicted: r.contradicted,
+        why_ranked: r.why_ranked,
+      })),
+    },
+  };
 }
