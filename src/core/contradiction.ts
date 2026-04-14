@@ -135,6 +135,12 @@ export function extractFacts(text: string, source?: string, timestamp?: number):
     if (owns) {
       facts.push({ subject: owns[1], predicate: 'owns', object: owns[2].trim(), confidence: 0.9, source, timestamp: now });
     }
+
+    // "The sky is blue" / "Sky is blue" / "Chris is tired"
+    const copula = line.match(/^(?:The\s+)?([A-Za-z][A-Za-z0-9_-]*)\s+is\s+(.+)$/i);
+    if (copula) {
+      facts.push({ subject: copula[1], predicate: 'is', object: copula[2].trim(), confidence: 0.8, source, timestamp: now });
+    }
   }
 
   return facts;
@@ -157,13 +163,13 @@ export class ContradictionDetector {
       const entityType = this.inferEntityType(fact.subject);
       const objectType = this.inferEntityType(fact.object);
 
-      let subjectEntity = this.kg.getEntity(fact.subject, entityType as EntityType);
+      let subjectEntity = this.kg.getEntityByName(fact.subject) ?? this.kg.getEntity(fact.subject, entityType as EntityType);
       if (!subjectEntity) {
         newEntities.push({ name: fact.subject, type: entityType });
         subjectEntity = this.kg.addEntity(fact.subject, entityType as EntityType);
       }
 
-      let objectEntity = this.kg.getEntity(fact.object, objectType as EntityType);
+      let objectEntity = this.kg.getEntityByName(fact.object) ?? this.kg.getEntity(fact.object, objectType as EntityType);
       if (!objectEntity) {
         newEntities.push({ name: fact.object, type: objectType });
         objectEntity = this.kg.addEntity(fact.object, objectType as EntityType);
@@ -219,6 +225,28 @@ export class ContradictionDetector {
           });
         }
       }
+
+      // Fallback: compare against extracted facts from existing memories when the KG
+      // does not yet hold a structured relation for this predicate.
+      const existingMemories = this.kg.searchMemories(fact.subject, undefined, undefined, 100);
+      for (const existingMemory of existingMemories) {
+        if (existingMemory.id === fact.source) continue;
+        const existingFacts = extractFacts(existingMemory.content, existingMemory.id, existingMemory.created_at);
+        for (const existingFact of existingFacts) {
+          if (existingFact.subject.toLowerCase() !== fact.subject.toLowerCase()) continue;
+          if (existingFact.predicate !== fact.predicate) continue;
+          if (existingFact.object.toLowerCase() === fact.object.toLowerCase()) continue;
+
+          contradictions.push({
+            new_fact: fact,
+            existing_fact: existingFact,
+            existing_entity_id: existingMemory.id,
+            severity: 'high',
+            reason: `Subject '${fact.subject}' already has predicate '${fact.predicate}' with object '${existingFact.object}', new value is '${fact.object}'`,
+            memoryId: existingMemory.id,
+          });
+        }
+      }
     }
 
     return {
@@ -233,6 +261,7 @@ export class ContradictionDetector {
     const lower = name.toLowerCase();
     if (['team', 'we', 'everyone', 'they'].includes(lower)) return 'agent';
     if (lower.includes('project') || lower.includes('initiative')) return 'project';
+    if (/^[a-z][a-z0-9_-]*$/.test(name)) return 'topic';
     return 'person';
   }
 

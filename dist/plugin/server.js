@@ -348,8 +348,12 @@ export async function toolDeleteDrawer(entryId) {
  */
 export async function toolKgQuery(entityId, asOf) {
     const c = getContext();
-    const entities = c.kg.queryEntities({ entity_id: entityId, as_of: asOf });
-    const relations = entityId ? c.kg.queryRelations(entityId, undefined, asOf) : [];
+    let entities = c.kg.queryEntities({ entity_id: entityId, as_of: asOf });
+    if (entities.length === 0 && entityId) {
+        entities = c.kg.queryEntities({ entity_name: entityId, as_of: asOf });
+    }
+    const resolvedEntityId = entities[0]?.id;
+    const relations = resolvedEntityId ? c.kg.queryRelations(resolvedEntityId, undefined, asOf) : [];
     return { entities, relations };
 }
 /**
@@ -401,6 +405,9 @@ function inferEntityType(name, defaultType = 'person') {
     // Agent indicators
     if (/\b(athena|athenamem|openclaw|codex|claude|gpt)\b/.test(lower)) {
         return 'agent';
+    }
+    if (/^[a-z][a-z0-9_-]*$/.test(name)) {
+        return 'topic';
     }
     // Person indicators (names typically don't have spaces, might have @)
     if (/^[A-Z][a-z]+$/.test(name) || name.includes('@')) {

@@ -74,6 +74,7 @@ export interface Entry {
 export type HallType = CategoryType;
 export interface TemporalQuery {
     entity_id?: string;
+    entity_name?: string;
     as_of?: number;
     include_expired?: boolean;
 }
@@ -108,6 +109,11 @@ export declare class KnowledgeGraph {
      * Get entity by name and type.
      */
     getEntity(name: string, type: EntityType): Entity | null;
+    /**
+     * Get an active entity by exact name, regardless of type.
+     * If multiple exist, return the earliest created active one.
+     */
+    getEntityByName(name: string): Entity | null;
     /**
      * Invalidate an entity — marks it as no longer current.
      * Historical queries will still see it; current queries won't.

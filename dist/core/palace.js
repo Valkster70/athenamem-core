@@ -57,6 +57,12 @@ export class Palace {
             memory_count: 0,
         };
     }
+    getOrCreateWing(name, description = '') {
+        const existing = this.getWing(name);
+        if (existing)
+            return existing;
+        return this.createWing(name, description);
+    }
     /**
      * List all wings.
      */
@@ -175,6 +181,7 @@ export class Palace {
      * A drawer can be a file path or a KG memory ID.
      */
     addDrawer(wingName, roomName, hall, filePath, content, contentHash) {
+        this.getOrCreateWing(wingName);
         const room = this.getOrCreateRoom(wingName, roomName);
         const hash = contentHash ?? this.hashContent(content);
         // Register drawer in KG

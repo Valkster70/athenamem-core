@@ -59,6 +59,7 @@ export declare class Palace {
      * A wing is the top-level container — typically one per person, agent, or project.
      */
     createWing(name: string, description?: string): Wing;
+    getOrCreateWing(name: string, description?: string): Wing;
     /**
      * List all wings.
      */

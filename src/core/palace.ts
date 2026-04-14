@@ -111,6 +111,12 @@ export class Palace {
     };
   }
 
+  getOrCreateWing(name: string, description: string = ''): Wing {
+    const existing = this.getWing(name);
+    if (existing) return existing;
+    return this.createWing(name, description);
+  }
+
   /**
    * List all wings.
    */
@@ -244,6 +250,7 @@ export class Palace {
     content: string,
     contentHash?: string
   ): { drawer: Drawer; memory: Memory } {
+    this.getOrCreateWing(wingName);
     const room = this.getOrCreateRoom(wingName, roomName);
     const hash = contentHash ?? this.hashContent(content);
 

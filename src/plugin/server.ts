@@ -453,8 +453,12 @@ export async function toolKgQuery(
   asOf?: number
 ): Promise<{ entities: Entity[]; relations: Relation[] }> {
   const c = getContext();
-  const entities = c.kg.queryEntities({ entity_id: entityId, as_of: asOf });
-  const relations = entityId ? c.kg.queryRelations(entityId, undefined, asOf) : [];
+  let entities = c.kg.queryEntities({ entity_id: entityId, as_of: asOf });
+  if (entities.length === 0 && entityId) {
+    entities = c.kg.queryEntities({ entity_name: entityId, as_of: asOf });
+  }
+  const resolvedEntityId = entities[0]?.id;
+  const relations = resolvedEntityId ? c.kg.queryRelations(resolvedEntityId, undefined, asOf) : [];
   return { entities, relations };
 }
 
@@ -537,6 +541,10 @@ function inferEntityType(name: string, defaultType: EntityType = 'person'): Enti
   // Agent indicators
   if (/\b(athena|athenamem|openclaw|codex|claude|gpt)\b/.test(lower)) {
     return 'agent';
+  }
+
+  if (/^[a-z][a-z0-9_-]*$/.test(name)) {
+    return 'topic';
   }
   
   // Person indicators (names typically don't have spaces, might have @)

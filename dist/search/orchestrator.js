@@ -348,7 +348,7 @@ export class SearchOrchestrator {
             sources: ['qmd', 'clawvault', 'hindsight', 'mnemo', 'kg'],
             limit,
             fuseK: 60,
-            minScore: 0.05,
+            minScore: 0.01,
         });
     }
 }

@@ -209,13 +209,22 @@ export class KnowledgeGraph {
      * If as_of is set, only returns entities that were valid at that time.
      */
     queryEntities(query = {}) {
-        const { entity_id, as_of = Date.now(), include_expired = false } = query;
+        const { entity_id, entity_name, as_of = Date.now(), include_expired = false } = query;
         if (entity_id) {
             const sql = include_expired
                 ? 'SELECT * FROM entities WHERE id = ?'
                 : 'SELECT * FROM entities WHERE id = ? AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ?';
             const row = this.db.prepare(sql).get(entity_id, as_of, as_of);
             return row ? [this.parseEntity(row)] : [];
+        }
+        if (entity_name) {
+            const sql = include_expired
+                ? 'SELECT * FROM entities WHERE lower(name) = lower(?) ORDER BY created_at ASC'
+                : 'SELECT * FROM entities WHERE lower(name) = lower(?) AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ? ORDER BY created_at ASC';
+            const rows = include_expired
+                ? this.db.prepare(sql).all(entity_name)
+                : this.db.prepare(sql).all(entity_name, as_of, as_of);
+            return rows.map(this.parseEntity);
         }
         const sql = include_expired
             ? 'SELECT * FROM entities'
@@ -229,6 +238,16 @@ export class KnowledgeGraph {
         const row = this.db.prepare(`
       SELECT * FROM entities WHERE name = ? AND type = ? AND valid_to IS NULL
     `).get(name, type);
+        return row ? this.parseEntity(row) : null;
+    }
+    /**
+     * Get an active entity by exact name, regardless of type.
+     * If multiple exist, return the earliest created active one.
+     */
+    getEntityByName(name) {
+        const row = this.db.prepare(`
+      SELECT * FROM entities WHERE lower(name) = lower(?) AND valid_to IS NULL ORDER BY created_at ASC LIMIT 1
+    `).get(name);
         return row ? this.parseEntity(row) : null;
     }
     /**
@@ -370,14 +389,21 @@ export class KnowledgeGraph {
      * Get memories by module and section (structure navigation).
      */
     getMemoriesByStructure(module, section, category) {
-        let sql = 'SELECT m.* FROM memories m JOIN entries e ON m.entry_id = e.entry_id WHERE m.module = ?';
+        let sql = `
+      SELECT m.*
+      FROM memories m
+      LEFT JOIN entries e ON m.entry_id = e.entry_id
+      LEFT JOIN drawers d ON m.entry_id = d.drawer_id
+      WHERE m.module = ?
+    `;
         const params = [module];
         if (section) {
             sql += ' AND m.section = ?';
             params.push(section);
         }
         if (category) {
-            sql += ' AND e.category = ?';
+            sql += ' AND (e.category = ? OR d.hall = ?)';
+            params.push(category);
             params.push(category);
         }
         sql += ' ORDER BY m.created_at DESC';
