@@ -135,7 +135,7 @@ const athenamem = definePluginEntry({
             if (event.sessionId) {
                 setSession(event.sessionId, event.agentId ?? "unknown");
             }
-        });
+        }, { name: "athenamem_core_before_agent_start", description: "Bind AthenaMem state to the active session." });
         // WAL checkpoint after every tool call
         api.registerHook("after_tool_call", async (event) => {
             if (Boolean(cfg?.auto_wal ?? true)) {
@@ -147,7 +147,7 @@ const athenamem = definePluginEntry({
                     // WAL failure is non-fatal
                 }
             }
-        });
+        }, { name: "athenamem_core_after_tool_call", description: "Checkpoint AthenaMem WAL after tool calls." });
         // Compaction before prompt is built (context window pressure)
         api.registerHook("before_prompt_build", async () => {
             if (Boolean(cfg?.compact_on_flush ?? true)) {
@@ -164,10 +164,10 @@ const athenamem = definePluginEntry({
                     // Compaction failure is non-fatal
                 }
             }
-        });
+        }, { name: "athenamem_core_before_prompt_build", description: "Run light compaction before prompt construction." });
         // ── Register all 19 tools ──────────────────────────────────────────────
         api.registerTool({
-            name: "athenamem_status",
+            name: "athenamem_core_status",
             description: "AthenaMem L0–L4 overview: KG stats, palace wings, WAL state, compaction metrics, and AAAK spec.",
             parameters: EmptySchema,
             async execute() {
@@ -176,7 +176,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_list_wings",
+            name: "athenamem_core_list_modules",
             description: "List all palace wings with room count and memory counts.",
             parameters: EmptySchema,
             async execute() {
@@ -185,7 +185,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_list_rooms",
+            name: "athenamem_core_list_sections",
             description: "List all rooms within a named wing.",
             parameters: ListRoomsSchema,
             async execute(_, params) {
@@ -194,7 +194,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_search",
+            name: "athenamem_core_search",
             description: "Hybrid palace search with optional wing/room filters. Returns ranked results.",
             parameters: SearchSchema,
             async execute(_, params) {
@@ -203,7 +203,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_get_aaak_spec",
+            name: "athenamem_core_get_aaak_spec",
             description: "Returns the full AAAK dialect reference.",
             parameters: EmptySchema,
             async execute() {
@@ -212,7 +212,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_add_drawer",
+            name: "athenamem_core_add_entry",
             description: "Store verbatim content in a palace drawer. Runs contradiction check if enabled.",
             parameters: AddDrawerSchema,
             async execute(_, params) {
@@ -221,7 +221,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_delete_drawer",
+            name: "athenamem_core_delete_entry",
             description: "Delete a drawer by ID. Memories are retained for KG integrity.",
             parameters: DeleteDrawerSchema,
             async execute(_, params) {
@@ -230,7 +230,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_kg_query",
+            name: "athenamem_core_kg_query",
             description: "Query KG entities and their relations, optionally as-of a point in time.",
             parameters: KgQuerySchema,
             async execute(_, params) {
@@ -239,7 +239,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_kg_add",
+            name: "athenamem_core_kg_add",
             description: "Add a subject–predicate–object fact to the KG with confidence score.",
             parameters: KgAddSchema,
             async execute(_, params) {
@@ -248,7 +248,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_kg_invalidate",
+            name: "athenamem_core_kg_invalidate",
             description: "Invalidate an entity as of a timestamp.",
             parameters: KgInvalidateSchema,
             async execute(_, params) {
@@ -257,7 +257,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_kg_timeline",
+            name: "athenamem_core_kg_timeline",
             description: "Get the chronological event timeline for an entity.",
             parameters: KgTimelineSchema,
             async execute(_, params) {
@@ -266,7 +266,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_check_facts",
+            name: "athenamem_core_check_facts",
             description: "Extract facts from text and check against KG for contradictions.",
             parameters: CheckFactsSchema,
             async execute(_, params) {
@@ -275,7 +275,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_resolve_conflict",
+            name: "athenamem_core_resolve_conflict",
             description: "Resolve a flagged contradiction.",
             parameters: ResolveConflictSchema,
             async execute(_, params) {
@@ -284,7 +284,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_diary_write",
+            name: "athenamem_core_diary_write",
             description: "Write an AAAK diary entry for an agent.",
             parameters: DiaryWriteSchema,
             async execute(_, params) {
@@ -293,7 +293,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_diary_read",
+            name: "athenamem_core_diary_read",
             description: "Read recent diary entries for an agent.",
             parameters: DiaryReadSchema,
             async execute(_, params) {
@@ -302,7 +302,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_traverse",
+            name: "athenamem_core_traverse",
             description: "Traverse a room and its tunnels, returning connected wings and memories.",
             parameters: TraverseSchema,
             async execute(_, params) {
@@ -311,7 +311,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_find_tunnels",
+            name: "athenamem_core_find_bridges",
             description: "Find rooms that bridge multiple wings.",
             parameters: EmptySchema,
             async execute() {
@@ -320,7 +320,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_recall",
+            name: "athenamem_core_recall",
             description: "Deep cross-system recall — fuses palace KG + qmd + ClawVault + Hindsight + Mnemo Cortex via RRF.",
             parameters: RecallSchema,
             async execute(_, params) {
@@ -329,7 +329,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_trace_memory",
+            name: "athenamem_core_trace_memory",
             description: "Return the audit trail for a memory: entry linkage, facts, contradictions, and lifecycle.",
             parameters: TraceMemorySchema,
             async execute(_, params) {
@@ -338,7 +338,7 @@ const athenamem = definePluginEntry({
             },
         });
         api.registerTool({
-            name: "athenamem_explain_recall",
+            name: "athenamem_core_explain_recall",
             description: "Explain why recalled memories ranked highly, including salience and validity flags.",
             parameters: ExplainRecallSchema,
             async execute(_, params) {
@@ -348,7 +348,7 @@ const athenamem = definePluginEntry({
         });
         // Create Wing Tool
         api.registerTool({
-            name: "athenamem_create_wing",
+            name: "athenamem_core_create_wing",
             description: "Create a new wing in the palace. Required before adding rooms.",
             parameters: Type.Object({
                 wingName: Type.String(),
@@ -362,7 +362,7 @@ const athenamem = definePluginEntry({
         });
         // Create Room Tool
         api.registerTool({
-            name: "athenamem_create_room",
+            name: "athenamem_core_create_room",
             description: "Create a new room within a wing. The wing must exist first.",
             parameters: Type.Object({
                 wingName: Type.String(),
