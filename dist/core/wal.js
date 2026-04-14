@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 export class WALManager {
     walDir;
     activeEntry = null;
+    activeStack = [];
     agentId;
     sessionId;
     constructor(walDir, agentId = 'default', sessionId = 'default') {
@@ -67,6 +68,7 @@ export class WALManager {
         fs.appendFileSync(this.getWalPath(), line, 'utf-8');
         // Write recovery file (overwritten each time, for crash recovery)
         fs.writeFileSync(this.getRecoveryPath(), JSON.stringify(this.activeEntry, null, 2), 'utf-8');
+        this.activeStack.push(this.activeEntry);
         return this.activeEntry;
     }
     /**
@@ -74,13 +76,44 @@ export class WALManager {
      * Marks the active WAL entry as committed.
      */
     commit() {
-        if (!this.activeEntry)
+        const current = this.activeStack.pop() ?? this.activeEntry;
+        if (!current)
             return;
-        this.activeEntry.committed = true;
-        this.activeEntry.flushed_at = Date.now();
+        current.committed = true;
+        current.flushed_at = Date.now();
+        const walPath = this.getWalPath();
+        if (fs.existsSync(walPath)) {
+            const lines = fs.readFileSync(walPath, 'utf-8').split('\n');
+            let changed = false;
+            const rewritten = lines.map((line) => {
+                if (!line.trim())
+                    return line;
+                try {
+                    const entry = JSON.parse(line);
+                    if (entry.id === current.id) {
+                        changed = true;
+                        return JSON.stringify(current);
+                    }
+                }
+                catch {
+                    // preserve malformed lines rather than deleting history
+                }
+                return line;
+            });
+            if (changed) {
+                fs.writeFileSync(walPath, rewritten.join('\n'), 'utf-8');
+            }
+            else {
+                fs.appendFileSync(walPath, JSON.stringify(current) + '\n', 'utf-8');
+            }
+        }
+        else {
+            fs.appendFileSync(walPath, JSON.stringify(current) + '\n', 'utf-8');
+        }
         // Update the recovery file with committed state
-        fs.writeFileSync(this.getRecoveryPath(), JSON.stringify(this.activeEntry, null, 2), 'utf-8');
-        this.activeEntry = null;
+        const nextActive = this.activeStack.length > 0 ? this.activeStack[this.activeStack.length - 1] : null;
+        this.activeEntry = nextActive;
+        fs.writeFileSync(this.getRecoveryPath(), JSON.stringify(nextActive ?? current, null, 2), 'utf-8');
     }
     /**
      * CHECKPOINT — Explicit state save (not tied to a turn).
@@ -113,19 +146,24 @@ export class WALManager {
      */
     recover() {
         const recoveryPath = this.getRecoveryPath();
-        if (!fs.existsSync(recoveryPath))
-            return null;
-        try {
-            const data = JSON.parse(fs.readFileSync(recoveryPath, 'utf-8'));
-            if (!data.committed) {
-                console.warn(`[WAL] Recovered uncommitted entry from ${new Date(data.timestamp).toISOString()}`);
-                return data;
+        if (fs.existsSync(recoveryPath)) {
+            try {
+                const data = JSON.parse(fs.readFileSync(recoveryPath, 'utf-8'));
+                if (!data.committed) {
+                    console.warn(`[WAL] Recovered uncommitted entry from ${new Date(data.timestamp).toISOString()}`);
+                    return data;
+                }
+            }
+            catch (e) {
+                console.error('[WAL] Failed to read recovery file:', e);
             }
         }
-        catch (e) {
-            console.error('[WAL] Failed to read recovery file:', e);
-        }
-        return null;
+        const uncommitted = this.getUncommitted();
+        if (uncommitted.length === 0)
+            return null;
+        const latest = uncommitted.reduce((acc, entry) => entry.timestamp > acc.timestamp ? entry : acc);
+        console.warn(`[WAL] Recovered uncommitted WAL entry from ${new Date(latest.timestamp).toISOString()}`);
+        return latest;
     }
     /**
      * Get recent uncommitted entries (for recovery checking).

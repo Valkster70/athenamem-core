@@ -39,6 +39,7 @@ export interface WALStats {
 export declare class WALManager {
     private walDir;
     private activeEntry;
+    private activeStack;
     private agentId;
     private sessionId;
     constructor(walDir: string, agentId?: string, sessionId?: string);
