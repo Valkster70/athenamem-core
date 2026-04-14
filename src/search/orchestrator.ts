@@ -25,14 +25,26 @@ export interface SearchResult {
   source: SearchSource;
   source_name: string;      // e.g., "qmd", "ClawVault/decisions"
   score: number;           // 0-1, fused score
-  rank?: number;           // optional — assigned post-fusion after fusion
+  
+  // Explainability fields
+  sourceScores?: Record<string, number>;  // Per-source contribution: { qmd: 0.85, kg: 0.72, ... }
+  salience?: number;       // Memory salience score (0-1)
+  valid?: boolean;         // false if invalidated
+  contradicted?: boolean;  // true if in conflict
+  
+  // Metadata
+  rank?: number;
   module?: string;
   section?: string;
   memory_type?: string;
   access_count?: number;
   timestamp?: number;
-  url?: string;            // for file-based results
+  url?: string;
   entry_id?: string;
+  
+  // Provenance
+  extractedFrom?: string;  // parent memory ID
+  contradictionWith?: string[]; // conflicting memory IDs
 }
 
 export type SearchSource = 'qmd' | 'clawvault' | 'hindsight' | 'mnemo' | 'kg' | 'athenamem';
