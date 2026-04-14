@@ -26,6 +26,7 @@ import {
   toolResolveConflict,
   toolDiaryWrite,
   toolDiaryRead,
+  toolDeleteWing,
   toolTraverse,
   toolFindTunnels,
   toolRecall,
@@ -56,6 +57,11 @@ const AddDrawerSchema = Type.Object({
   hall: Type.String(),
   content: Type.String(),
   filePath: Type.Optional(Type.String()),
+  salience: Type.Optional(Type.Number()),
+});
+
+const DeleteWingSchema = Type.Object({
+  wingName: Type.String(),
 });
 
 const DeleteDrawerSchema = Type.Object({
@@ -304,6 +310,7 @@ const athenamem = definePluginEntry({
           String(params.hall) as any,
           String(params.content),
           params.filePath != null ? String(params.filePath) : undefined,
+          params.salience != null ? Number(params.salience) : undefined,
         );
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       },
@@ -510,6 +517,16 @@ const athenamem = definePluginEntry({
       async execute(_, params) {
         const desc2 = typeof params.description === "string" ? params.description : "";
         const result = await toolCreateRoom(String(params.wingName), String(params.roomName), desc2);
+        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+      },
+    });
+
+    api.registerTool({
+      name: "athenamem_core_delete_wing",
+      description: "Delete a wing's palace files and invalidate its memories.",
+      parameters: DeleteWingSchema,
+      async execute(_, params) {
+        const result = await toolDeleteWing(String(params.wingName));
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       },
     });

@@ -6,7 +6,7 @@ import { Type } from "@sinclair/typebox";
 import { homedir } from "os";
 import * as path from "path";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { init, getContext, setSession, toolStatus, toolListWings, toolListRooms, toolSearch, toolGetAaakSpec, toolAddDrawer, toolDeleteDrawer, toolKgQuery, toolKgAdd, toolKgInvalidate, toolKgTimeline, toolCheckFacts, toolResolveConflict, toolDiaryWrite, toolDiaryRead, toolTraverse, toolFindTunnels, toolRecall, toolCreateWing, toolCreateRoom, toolTraceMemory, toolExplainRecall, } from "./plugin/server.js";
+import { init, getContext, setSession, toolStatus, toolListWings, toolListRooms, toolSearch, toolGetAaakSpec, toolAddDrawer, toolDeleteDrawer, toolKgQuery, toolKgAdd, toolKgInvalidate, toolKgTimeline, toolCheckFacts, toolResolveConflict, toolDiaryWrite, toolDiaryRead, toolDeleteWing, toolTraverse, toolFindTunnels, toolRecall, toolCreateWing, toolCreateRoom, toolTraceMemory, toolExplainRecall, } from "./plugin/server.js";
 // ─── Tool parameter schemas ─────────────────────────────────────────────────────
 const EmptySchema = Type.Object({});
 const ListRoomsSchema = Type.Object({
@@ -24,6 +24,10 @@ const AddDrawerSchema = Type.Object({
     hall: Type.String(),
     content: Type.String(),
     filePath: Type.Optional(Type.String()),
+    salience: Type.Optional(Type.Number()),
+});
+const DeleteWingSchema = Type.Object({
+    wingName: Type.String(),
 });
 const DeleteDrawerSchema = Type.Object({
     entryId: Type.String(),
@@ -216,7 +220,7 @@ const athenamem = definePluginEntry({
             description: "Store verbatim content in a palace drawer. Runs contradiction check if enabled.",
             parameters: AddDrawerSchema,
             async execute(_, params) {
-                const result = await toolAddDrawer(String(params.wingName), String(params.roomName), String(params.hall), String(params.content), params.filePath != null ? String(params.filePath) : undefined);
+                const result = await toolAddDrawer(String(params.wingName), String(params.roomName), String(params.hall), String(params.content), params.filePath != null ? String(params.filePath) : undefined, params.salience != null ? Number(params.salience) : undefined);
                 return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
             },
         });
@@ -372,6 +376,15 @@ const athenamem = definePluginEntry({
             async execute(_, params) {
                 const desc2 = typeof params.description === "string" ? params.description : "";
                 const result = await toolCreateRoom(String(params.wingName), String(params.roomName), desc2);
+                return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+            },
+        });
+        api.registerTool({
+            name: "athenamem_core_delete_wing",
+            description: "Delete a wing's palace files and invalidate its memories.",
+            parameters: DeleteWingSchema,
+            async execute(_, params) {
+                const result = await toolDeleteWing(String(params.wingName));
                 return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
             },
         });

@@ -94,6 +94,7 @@ export declare function ingestMemory(module: string, section: string, category: 
     source?: MemorySource;
     filePath?: string;
     confidence?: number;
+    salienceOverride?: number;
     provenance?: {
         triggerTool?: string;
         parentMemoryIds?: string[];
@@ -123,7 +124,7 @@ export declare function toolGetAaakSpec(): Promise<string>;
 /**
  * athenamem_add_drawer — store verbatim content (unified ingestion).
  */
-export declare function toolAddDrawer(wingName: string, roomName: string, hall: HallType, content: string, filePath?: string): Promise<{
+export declare function toolAddDrawer(wingName: string, roomName: string, hall: HallType, content: string, filePath?: string, salience?: number): Promise<{
     drawer_id: string;
     memory_id: string;
     salience: number;
@@ -207,6 +208,11 @@ export declare function toolResolveConflict(memoryId: string, resolution: 'keep_
 export declare function toolDiaryWrite(agentName: string, entryType: string, content: string): Promise<{
     memory_id: string;
     salience: number;
+}>;
+export declare function toolDeleteWing(wingName: string): Promise<{
+    deleted: boolean;
+    rooms_removed: number;
+    memories_invalidated: number;
 }>;
 /**
  * athenamem_diary_read — read recent diary entries.

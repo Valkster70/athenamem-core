@@ -199,6 +199,7 @@ export async function ingestMemory(module, section, category, content, options =
         source: options.source ?? 'tool',
         confidence: options.confidence ?? 1.0,
         salience: 0.5, // Will be computed by pipeline
+        salienceOverride: options.salienceOverride,
         provenance: {
             triggerTool: options.provenance?.triggerTool,
             filePath: options.filePath,
@@ -301,11 +302,12 @@ export async function toolGetAaakSpec() {
 /**
  * athenamem_add_drawer — store verbatim content (unified ingestion).
  */
-export async function toolAddDrawer(wingName, roomName, hall, content, filePath) {
+export async function toolAddDrawer(wingName, roomName, hall, content, filePath, salience) {
     const category = mapHallToCategory(hall);
     const result = await ingestMemory(wingName, roomName, category, content, {
         source: 'tool',
         filePath: filePath ?? `${hall}/${wingName}-${roomName}-${Date.now()}.md`,
+        salienceOverride: salience,
         provenance: { triggerTool: 'add_drawer' },
     });
     return {
@@ -436,7 +438,15 @@ export async function toolKgInvalidate(id, type = 'memory', reason = 'superseded
  * athenamem_kg_timeline — chronological entity story.
  */
 export async function toolKgTimeline(entityId) {
-    return { timeline: getContext().kg.timeline(entityId) };
+    const c = getContext();
+    let resolved = entityId;
+    const entities = c.kg.queryEntities({ entity_id: entityId });
+    if (entities.length === 0) {
+        const byName = c.kg.queryEntities({ entity_name: entityId });
+        if (byName.length > 0)
+            resolved = byName[0].id;
+    }
+    return { timeline: c.kg.timeline(resolved) };
 }
 /**
  * athenamem_check_facts — check assertions against KG.
@@ -473,6 +483,10 @@ export async function toolDiaryWrite(agentName, entryType, content) {
         memory_id: result.memoryId,
         salience: result.salienceScore,
     };
+}
+export async function toolDeleteWing(wingName) {
+    const { palace } = getContext();
+    return palace.deleteWing(wingName);
 }
 /**
  * athenamem_diary_read — read recent diary entries.

@@ -50,6 +50,7 @@ export interface MemoryEvent {
   
   // Optional metadata for downstream processing
   metadata?: Record<string, unknown>;
+  salienceOverride?: number;
   
   // For structured data extraction
   extractedFacts?: Array<{

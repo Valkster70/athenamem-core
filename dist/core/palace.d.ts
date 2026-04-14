@@ -60,6 +60,11 @@ export declare class Palace {
      */
     createWing(name: string, description?: string): Wing;
     getOrCreateWing(name: string, description?: string): Wing;
+    deleteWing(name: string): {
+        deleted: boolean;
+        rooms_removed: number;
+        memories_invalidated: number;
+    };
     /**
      * List all wings.
      */

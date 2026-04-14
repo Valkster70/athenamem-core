@@ -92,7 +92,10 @@ export async function ingestMemoryEvent(
 
     // 3. Compute salience score
     let salienceScore = 0.5;
-    if (!options.skipSalience) {
+    if (typeof fullEvent.salienceOverride === 'number') {
+      salienceScore = Math.max(0, Math.min(1, fullEvent.salienceOverride));
+      fullEvent.salience = salienceScore;
+    } else if (!options.skipSalience) {
       const salienceInput: SalienceInput = {
         category: fullEvent.category,
         content: fullEvent.content,

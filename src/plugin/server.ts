@@ -258,6 +258,7 @@ export async function ingestMemory(
     source?: MemorySource;
     filePath?: string;
     confidence?: number;
+    salienceOverride?: number;
     provenance?: { triggerTool?: string; parentMemoryIds?: string[] };
     skipContradictionCheck?: boolean;
   } = {}
@@ -274,6 +275,7 @@ export async function ingestMemory(
     source: options.source ?? 'tool',
     confidence: options.confidence ?? 1.0,
     salience: 0.5, // Will be computed by pipeline
+    salienceOverride: options.salienceOverride,
     provenance: {
       triggerTool: options.provenance?.triggerTool,
       filePath: options.filePath,
@@ -390,7 +392,8 @@ export async function toolAddDrawer(
   roomName: string,
   hall: HallType,
   content: string,
-  filePath?: string
+  filePath?: string,
+  salience?: number
 ): Promise<{ drawer_id: string; memory_id: string; salience: number }> {
   const category = mapHallToCategory(hall);
   const result = await ingestMemory(
@@ -401,6 +404,7 @@ export async function toolAddDrawer(
     {
       source: 'tool',
       filePath: filePath ?? `${hall}/${wingName}-${roomName}-${Date.now()}.md`,
+      salienceOverride: salience,
       provenance: { triggerTool: 'add_drawer' },
     }
   );
@@ -583,7 +587,14 @@ export async function toolKgInvalidate(
  * athenamem_kg_timeline — chronological entity story.
  */
 export async function toolKgTimeline(entityId: string): Promise<{ timeline: { time: number; event: string; type: string }[] }> {
-  return { timeline: getContext().kg.timeline(entityId) };
+  const c = getContext();
+  let resolved = entityId;
+  const entities = c.kg.queryEntities({ entity_id: entityId });
+  if (entities.length === 0) {
+    const byName = c.kg.queryEntities({ entity_name: entityId });
+    if (byName.length > 0) resolved = byName[0].id;
+  }
+  return { timeline: c.kg.timeline(resolved) };
 }
 
 /**
@@ -641,6 +652,11 @@ export async function toolDiaryWrite(
     memory_id: result.memoryId,
     salience: result.salienceScore,
   };
+}
+
+export async function toolDeleteWing(wingName: string): Promise<{ deleted: boolean; rooms_removed: number; memories_invalidated: number }> {
+  const { palace } = getContext();
+  return palace.deleteWing(wingName);
 }
 
 /**

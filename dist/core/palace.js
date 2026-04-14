@@ -63,6 +63,30 @@ export class Palace {
             return existing;
         return this.createWing(name, description);
     }
+    deleteWing(name) {
+        const wing = this.getWing(name);
+        if (!wing) {
+            return { deleted: false, rooms_removed: 0, memories_invalidated: 0 };
+        }
+        const rooms = this.listRooms(name);
+        const memories = this.kg.getMemoriesByPalace(name);
+        for (const memory of memories) {
+            this.kg.invalidateMemory(memory.id, 'user_deleted');
+        }
+        const wingEntity = this.kg.getEntityByName(name);
+        if (wingEntity) {
+            this.kg.invalidateEntity(wingEntity.id);
+        }
+        const wingFile = path.join(this.palaceDir, `wing-${name}.json`);
+        if (fs.existsSync(wingFile))
+            fs.unlinkSync(wingFile);
+        for (const room of rooms) {
+            const roomFile = path.join(this.palaceDir, `room-${name}-${room.name}.json`);
+            if (fs.existsSync(roomFile))
+                fs.unlinkSync(roomFile);
+        }
+        return { deleted: true, rooms_removed: rooms.length, memories_invalidated: memories.length };
+    }
     /**
      * List all wings.
      */
