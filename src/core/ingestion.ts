@@ -157,7 +157,9 @@ export async function ingestMemoryEvent(
       
       if (contradictionsDetected > 0) {
         fullEvent.state = 'contradicted';
-        fullEvent.contradictionIds = contradictionResult.contradictions.map(c => c.memoryId);
+        fullEvent.contradictionIds = contradictionResult.contradictions
+          .map(c => c.memoryId || c.memory_id)
+          .filter((id): id is string => id !== undefined);
         warnings.push(`${contradictionsDetected} contradiction(s) detected`);
       } else {
         fullEvent.state = 'indexed';

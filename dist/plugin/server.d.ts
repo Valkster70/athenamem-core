@@ -14,12 +14,13 @@
  * - Navigation (2): traverse, find_tunnels
  * - Cross-system recall (2): recall (deep search), quick_search
  */
-import { KnowledgeGraph, Entity, Relation, Memory, HallType, Predicate } from '../core/kg.js';
+import { KnowledgeGraph, Entity, Relation, Memory, EntityType, HallType, Predicate } from '../core/kg.js';
 import { Palace, Wing, Room, Tunnel } from '../core/palace.js';
 import { WALManager } from '../core/wal.js';
 import { ContradictionDetector } from '../core/contradiction.js';
 import { CompactionEngine } from '../core/compaction.js';
 import { SearchOrchestrator, SearchResult, SearchResponse } from '../search/orchestrator.js';
+import { CategoryType, MemorySource, IngestionResult } from '../core/event.js';
 export interface AthenaMemConfig {
     data_dir: string;
     palace_dir: string;
@@ -84,6 +85,22 @@ export declare function onFlush(): Promise<{
     new_frontier_nodes: number;
 }>;
 /**
+ * Unified memory ingestion — THE single entry point for all memory writes.
+ *
+ * All tools that create memory must use this function.
+ * It provides durability, auditability, salience scoring, and KG updates.
+ */
+export declare function ingestMemory(module: string, section: string, category: CategoryType, content: string, options?: {
+    source?: MemorySource;
+    filePath?: string;
+    confidence?: number;
+    provenance?: {
+        triggerTool?: string;
+        parentMemoryIds?: string[];
+    };
+    skipContradictionCheck?: boolean;
+}): Promise<IngestionResult>;
+/**
  * athenamem_status — L0-L4 overview + AAAK spec.
  */
 export declare function toolStatus(): Promise<string>;
@@ -104,17 +121,21 @@ export declare function toolSearch(query: string, wing?: string, room?: string, 
  */
 export declare function toolGetAaakSpec(): Promise<string>;
 /**
- * athenamem_add_drawer — store verbatim content.
+ * athenamem_add_drawer — store verbatim content (unified ingestion).
  */
 export declare function toolAddDrawer(wingName: string, roomName: string, hall: HallType, content: string, filePath?: string): Promise<{
     drawer_id: string;
     memory_id: string;
+    salience: number;
 }>;
 /**
- * athenamem_delete_drawer — remove by ID.
+ * athenamem_delete_drawer — invalidate memories by entry ID (soft delete).
+ *
+ * Memories are marked as invalidated rather than deleted to preserve audit trail.
  */
-export declare function toolDeleteDrawer(drawerId: string): Promise<{
+export declare function toolDeleteDrawer(entryId: string): Promise<{
     deleted: boolean;
+    memories_invalidated: number;
 }>;
 /**
  * athenamem_kg_query — entity relationships with time filtering.
@@ -124,17 +145,31 @@ export declare function toolKgQuery(entityId?: string, asOf?: number): Promise<{
     relations: Relation[];
 }>;
 /**
- * athenamem_kg_add — add facts.
+ * athenamem_kg_add — add facts with proper entity typing.
+ *
+ * Defaults to 'person' for both entities if type not specified.
+ * Infers types from module/category context when possible.
  */
-export declare function toolKgAdd(subject: string, predicate: Predicate, object: string, confidence?: number, metadata?: Record<string, unknown>): Promise<{
-    entity_id: string;
+export declare function toolKgAdd(subject: string, predicate: Predicate, object: string, confidence?: number, subjectType?: EntityType, objectType?: EntityType, sourceMemoryId?: string, metadata?: Record<string, unknown>): Promise<{
+    subject_entity_id: string;
+    object_entity_id: string;
     relation_id: string;
+    inferred_types: {
+        subject: EntityType;
+        object: EntityType;
+    };
 }>;
 /**
- * athenamem_kg_invalidate — mark entity/relation as ended.
+ * athenamem_kg_invalidate — mark memory or entity as no longer current.
+ *
+ * Invalidation = "this is no longer true" (separate from contradictions).
+ * Reasons: user_deleted, expired, superseded, error.
  */
-export declare function toolKgInvalidate(entityId: string, ended?: number): Promise<{
+export declare function toolKgInvalidate(id: string, type?: 'memory' | 'entity', reason?: 'user_deleted' | 'expired' | 'superseded' | 'error', ended?: number): Promise<{
     invalidated: boolean;
+    type: string;
+    id: string;
+    valid_to: number;
 }>;
 /**
  * athenamem_kg_timeline — chronological entity story.
@@ -167,10 +202,11 @@ export declare function toolResolveConflict(memoryId: string, resolution: 'keep_
     action: string;
 }>;
 /**
- * athenamem_diary_write — write AAAK diary entry.
+ * athenamem_diary_write — write AAAK diary entry (unified ingestion).
  */
 export declare function toolDiaryWrite(agentName: string, entryType: string, content: string): Promise<{
     memory_id: string;
+    salience: number;
 }>;
 /**
  * athenamem_diary_read — read recent diary entries.
@@ -211,4 +247,50 @@ export declare function toolFindTunnels(): Promise<{
 export declare function toolRecall(query: string, limit?: number): Promise<SearchResponse>;
 export declare function toolCreateWing(wingName: string, description?: string): Promise<Wing>;
 export declare function toolCreateRoom(wingName: string, roomName: string, description?: string): Promise<Room>;
+/**
+ * athenamem_trace_memory — full audit trail of a memory.
+ */
+export declare function toolTraceMemory(memoryId: string): Promise<{
+    found: boolean;
+    trace?: {
+        memory: Memory;
+        entry: {
+            file_path: string;
+            content_hash: string;
+        } | null;
+        facts: number;
+        contradictions: number;
+        lifecycle: {
+            created: number;
+            last_accessed: number | null;
+            access_count: number;
+            status: string;
+        };
+    };
+    error?: string;
+}>;
+/**
+ * athenamem_explain_recall — why did these memories rank here?
+ *
+ * ⚠️ CURRENT LIMITATION: This returns approximate explanations based on
+ * stored memory metadata. Full source breakdown requires orchestrator support.
+ */
+export declare function toolExplainRecall(query: string, resultMemoryIds: string[]): Promise<{
+    query: string;
+    approximate: boolean;
+    note: string;
+    explanation: {
+        memory_count: number;
+        filters_applied: string[];
+        top_memories: Array<{
+            rank: number;
+            memory_id: string;
+            score: number;
+            salience: number;
+            valid: boolean;
+            contradicted: boolean;
+            why_ranked: string[];
+        }>;
+    };
+}>;
 //# sourceMappingURL=server.d.ts.map

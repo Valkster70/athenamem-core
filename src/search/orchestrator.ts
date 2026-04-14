@@ -51,8 +51,10 @@ export type SearchSource = 'qmd' | 'clawvault' | 'hindsight' | 'mnemo' | 'kg' | 
 
 export interface SearchOptions {
   query: string;
-  module?: string;            // filter to module
-  section?: string;            // filter to section
+  module?: string;            // filter to module (legacy: use wing)
+  section?: string;            // filter to section (legacy: use room)
+  wing?: string;              // filter to wing (preferred)
+  room?: string;              // filter to room (preferred)
   sources?: SearchSource[]; // which systems to query (default: all)
   limit?: number;           // max results (default: 20)
   fuseK?: number;           // RRF k parameter (default: 60)
@@ -90,7 +92,7 @@ export interface SearchResponse {
  *   Documents not in a list get rank = ∞ and contribute 0
  */
 function reciprocalRankFusion(
-  rankedLists: Map<string, { source: SearchSource; rank: number; score: number }>[],
+  rankedLists: Map<string, { source: SearchSource; rank: number; score: number; result: SearchResult }>[],
   k: number = 60
 ): Map<string, number> {
   const scores = new Map<string, number>();
@@ -109,7 +111,7 @@ function reciprocalRankFusion(
 
 export class SearchOrchestrator {
   private kg: KnowledgeGraph;
-  private structure: Structure;
+  private palace: Palace;
   private qmdPath: string;
   private clawvaultPath: string;
   private hindsightUrl: string;
@@ -117,7 +119,7 @@ export class SearchOrchestrator {
 
   constructor(
     kg: KnowledgeGraph,
-    structure: Structure,
+    palace: Palace,
     opts: {
       qmdPath?: string;
       clawvaultPath?: string;
@@ -126,7 +128,7 @@ export class SearchOrchestrator {
     } = {}
   ) {
     this.kg = kg;
-    this.structure = structure;
+    this.palace = palace;
     this.qmdPath = opts.qmdPath ?? `${process.env.HOME}/.cache/qmd`;
     this.clawvaultPath = opts.clawvaultPath ?? `${process.env.HOME}/.openclaw/workspace/memory`;
     this.hindsightUrl = opts.hindsightUrl ?? 'http://127.0.0.1:8888';
@@ -163,7 +165,7 @@ export class SearchOrchestrator {
     }
 
     const results = await Promise.allSettled(queries);
-    const rankedLists: Map<string, { source: SearchSource; rank: number; score: number }>[] = [];
+    const rankedLists: Map<string, { source: SearchSource; rank: number; score: number; result: SearchResult }>[] = [];
     const sourcesWithResults: SearchSource[] = [];
 
     for (let i = 0; i < results.length; i++) {
@@ -392,28 +394,23 @@ export class SearchOrchestrator {
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
 
-  private toRankedMap(results: SearchResult[]): Map<string, { source: SearchSource; rank: number; score: number }> {
-    const map = new Map<string, { source: SearchSource; rank: number; score: number }>();
+  private toRankedMap(results: SearchResult[]): Map<string, { source: SearchSource; rank: number; score: number; result: SearchResult }> {
+    const map = new Map<string, { source: SearchSource; rank: number; score: number; result: SearchResult }>();
     for (let i = 0; i < results.length; i++) {
       const r = results[i];
-      map.set(r.id, { source: r.source, rank: i + 1, score: r.score ?? 0 });
+      map.set(r.id, { source: r.source, rank: i + 1, score: r.score ?? 0, result: r });
     }
     return map;
   }
 
-  private findResultById(rankedLists: Map<string, { source: SearchSource; rank: number; score: number }>[], id: string): SearchResult | null {
-    for (const list of rankedLists) {
-      const entry = list.get(id);
+  private findResultById(rankedLists: Map<string, { source: SearchSource; rank: number; score: number; result: SearchResult }>[], id: string): SearchResult | null {
+    for (const map of rankedLists) {
+      const entry = map.get(id);
       if (entry) {
-        // Can't easily recover original result from here without storing it
-        // Return a placeholder — will be refined
         return {
-          id,
-          content: '',
-          source: entry.source,
-          source_name: entry.source,
-          score: entry.score,
+          ...entry.result,
           rank: entry.rank,
+          score: entry.score,
         };
       }
     }

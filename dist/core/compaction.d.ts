@@ -48,12 +48,31 @@ export declare class CompactionEngine {
         depth: number;
     };
     getActiveFrontier(): CompactionNode[];
+    /**
+     * Schedule compaction with salience-aware policy.
+     *
+     * NEVER compact:
+     * - Very high-salience items (salience >= 0.75)
+     * - Unresolved contradictions
+     * - Recent active project decisions
+     *
+     * PRIORITIZE compacting:
+     * - Older low-access memories
+     * - Repetitive discoveries
+     * - Resolved/invalidated items
+     */
     scheduleCompaction(memories: Memory[]): {
         toCompact: {
             ids: string[];
             level: 1 | 2 | 3;
         }[];
         stats: CompactionStats;
+        policy: {
+            protected_count: number;
+            high_salience: number;
+            contradictions: number;
+            candidates: number;
+        };
     };
     stats(): CompactionStats;
     private targetTokens;

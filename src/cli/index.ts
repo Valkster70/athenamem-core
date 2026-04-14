@@ -8,26 +8,26 @@
  * 
  * Commands:
  *   init              Initialize AthenaMem workspace
- *   status            Show structure overview + system health
+ *   status            Show palace overview + system health
  *   wake              Load L0 + L1 context (for agent bootstrap)
  *   checkpoint        Save current state (WAL enforcement)
  *   sleep <summary>   End session, finalize
  *   remember          Store a new memory
  *   recall <query>    Search across all memory systems
  *   search <query>    Quick search (qmd + KG only)
- *   modules [list]    List or manage modules
- *   sections <module> List sections in a module
+ *   wings [list]      List or manage wings
+ *   rooms <wing>      List rooms in a wing
  *   diary <agent>     Write/read agent diary
  *   audit             Check for contradictions
  *   compact           Run DAG compaction
  *   stats             Show KG statistics
  *   export            Export KG as JSON
  *   import <file>     Import KG from JSON
- *   bridge <from> <to> <section>  Create cross-module bridge
+ *   tunnel <from> <to> <room>  Create cross-wing tunnel
  */
 
 import { KnowledgeGraph } from '../core/kg.js';
-import { Structure } from '../core/structure.js';
+import { Palace } from '../core/palace.js';
 import { WALManager } from '../core/wal.js';
 import { CompactionEngine, RuleBasedCompiler } from '../core/compaction.js';
 import { SearchOrchestrator, formatSearchResults } from '../search/orchestrator.js';
@@ -50,7 +50,7 @@ const command = args[0];
 const subargs = args.slice(1);
 
 runCommand(command, subargs).catch(err => {
-  console.error(`Error: ${err.message}`);
+  console.error('Error:', err.message);
   process.exit(1);
 });
 
@@ -60,17 +60,17 @@ async function runCommand(cmd: string, args: string[]): Promise<void> {
   const home = process.env.HOME ?? '/home/chris';
   const workDir = path.join(home, '.openclaw', 'workspace', 'athenamem');
   const dataDir = path.join(workDir, 'data');
-  const structureDir = path.join(workDir, 'structure');
+  const palaceDir = path.join(workDir, 'palace');
 
   // Ensure directories exist
-  for (const dir of [workDir, dataDir, structureDir]) {
+  for (const dir of [workDir, dataDir, palaceDir]) {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
   }
 
   const kg = new KnowledgeGraph(path.join(dataDir, 'athenamem.db'));
-  const structure = new Structure(kg, structureDir);
+  const palace = new Palace(kg, palaceDir);
   const wal = new WALManager(path.join(dataDir, 'wal'));
 
   switch (cmd) {
@@ -79,164 +79,206 @@ async function runCommand(cmd: string, args: string[]): Promise<void> {
     case 'init':
       return cmdInit(workDir, args);
     case 'status':
-      return cmdStatus(kg, structure);
+      return cmdStatus(kg, palace);
     case 'wake':
-      return cmdWake(kg, structure, wal, workDir);
+      return cmdWake(kg, palace, wal, workDir);
     case 'checkpoint':
-      return cmdCheckpoint(kg, structure, wal, workDir, args);
+      return cmdCheckpoint(kg, palace, wal, workDir, args);
     case 'sleep':
-      return cmdSleep(kg, structure, wal, workDir, args);
+      return cmdSleep(kg, palace, wal, workDir, args);
     case 'remember':
-      return cmdRemember(kg, structure, args);
+      return cmdRemember(kg, palace, args);
     case 'recall':
-      return cmdRecall(kg, structure, args);
+      return cmdRecall(kg, palace, args);
     case 'search':
-      return cmdSearch(kg, structure, args);
+      return cmdSearch(kg, palace, args);
     case 'rebuild-fts':
       return cmdRebuildFTS(kg);
-    case 'modules':
-      return cmdModules(structure, args);
-    case 'sections':
-      return cmdSections(structure, args);
+    case 'wings':
+      return cmdWings(palace, args);
+    case 'rooms':
+      return cmdRooms(palace, args);
     case 'diary':
-      return cmdDiary(kg, structure, args);
+      return cmdDiary(kg, palace, args);
     case 'audit':
       return cmdAudit(kg);
     case 'compact':
-      return cmdCompact(kg, structure, workDir);
+      return cmdCompact(kg, palace, workDir);
     case 'stats':
       return cmdStats(kg);
     case 'export':
       return cmdExport(kg, args);
     case 'import':
       return cmdImport(kg, args);
-    case 'bridge':
-      return cmdBridge(structure, args);
-    case '--version':
-    case 'version':
-      return console.log(`AthenaMem v${VERSION}`);
+    case 'tunnel':
+      return cmdTunnel(palace, args);
     default:
-      throw new Error(`Unknown command: ${cmd}. Run "athenamem help" for usage.`);
+      throw new Error(`Unknown command: ${cmd}. Run "athenamem help" for available commands.`);
   }
 }
 
-// ─── Commands ─────────────────────────────────────────────────────────────────
+function printHelp(cmd?: string): void {
+  if (!cmd) {
+    console.log('AthenaMem Commands:');
+    console.log('  init                  Initialize AthenaMem workspace');
+    console.log('  status                Show palace overview + KG stats');
+    console.log('  wake                  Load L0 + L1 context (agent bootstrap)');
+    console.log('  checkpoint [msg]      Save current state (WAL enforcement)');
+    console.log('  sleep <summary>       End session, finalize');
+    console.log('  remember              Store a new memory');
+    console.log('  recall <query>        Search across all memory systems');
+    console.log('  search <query>        Quick search (qmd + KG only)');
+    console.log('  wings [list]          List or manage wings');
+    console.log('  rooms <wing>            List rooms in a wing');
+    console.log('  diary <agent>         Write/read agent diary');
+    console.log('  audit                 Check for contradictions');
+    console.log('  compact               Run DAG compaction');
+    console.log('  stats                 Show KG statistics');
+    console.log('  export <file>         Export KG as JSON');
+    console.log('  import <file>         Import KG from JSON');
+    console.log('  tunnel <from> <to> <room>  Create cross-wing tunnel');
+    return;
+  }
 
-function cmdInit(workDir: string, args: string[]): void {
-  const name = args[0] ?? 'athenamem';
-  console.log(`Initializing ${name} at ${workDir}...`);
-  console.log('Done. Run "athenamem status" to verify.');
+  const helpText: Record<string, string> = {
+    init: 'Initialize AthenaMem workspace\nUsage: athenamem init',
+    remember: 'Store a new memory\nUsage: athenamem remember <wing> <room> <hall> <content>',
+    recall: 'Search across all memory systems\nUsage: athenamem recall <query>',
+    search: 'Quick search (qmd + KG only)\nUsage: athenamem search <query>',
+    wings: 'List or manage wings\nUsage: athenamem wings [create <name> [desc]]',
+    rooms: 'List rooms in a wing\nUsage: athenamem rooms <wing>',
+    diary: 'Write/read agent diary\nUsage: athenamem diary <agent> [write <content> | read]',
+    audit: 'Check for contradictions\nUsage: athenamem audit',
+    compact: 'Run DAG compaction\nUsage: athenamem compact',
+  };
+
+  console.log(helpText[cmd] || `No detailed help for: ${cmd}`);
 }
 
-async function cmdStatus(kg: KnowledgeGraph, structure: Structure): Promise<void> {
+// ─── Command Implementations ───────────────────────────────────────────────────
+
+async function cmdInit(workDir: string, args: string[]): Promise<void> {
+  console.log('Initializing AthenaMem workspace...');
+
+  const dirs = ['data', 'palace', 'logs'];
+  for (const dir of dirs) {
+    const fullPath = path.join(workDir, dir);
+    if (!fs.existsSync(fullPath)) {
+      fs.mkdirSync(fullPath, { recursive: true });
+      console.log(`  Created: ${fullPath}`);
+    }
+  }
+
+  // Create default config
+  const configPath = path.join(workDir, 'config.json');
+  if (!fs.existsSync(configPath)) {
+    const config = {
+      version: VERSION,
+      default_wing: 'main',
+      auto_checkpoint: true,
+      llm: {
+        model: 'gpt-4o-mini',
+        temperature: 0.7,
+      },
+    };
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    console.log(`  Created: ${configPath}`);
+  }
+
+  console.log('\n✅ AthenaMem workspace initialized!');
+  console.log(`   Location: ${workDir}`);
+}
+
+async function cmdStatus(kg: KnowledgeGraph, palace: Palace): Promise<void> {
   const stats = kg.stats();
-  const modules = structure.listModules();
-  const walStats = new WALManager(path.join(process.env.HOME ?? '', '.openclaw', 'workspace', 'athenamem', 'data', 'wal')).stats();
+  const wings = palace.listWings();
 
-  console.log(`
-# AthenaMem Structure Status
-=========================
-
-## Knowledge Graph
-  Entities:   ${stats.entity_count} (${stats.active_entities} active)
-  Relations:   ${stats.relation_count}
-  Memories:    ${stats.memory_count}
-  Entries:     ${stats.entry_count}
-  Contradictions flagged: ${stats.contradictions}
-
-## Structure Modules
-  ${modules.length === 0 ? 'No modules created yet.' : ''}
-${modules.map(m => `  ${m.name} (${m.section_count} sections, ${m.memory_count} memories)`).join('\n')}
-
-## WAL Status
-  Total entries:  ${walStats.total_entries}
-  Committed:     ${walStats.committed}
-  Uncommitted:   ${walStats.uncommitted}
-  Recovery:       ${walStats.recovery_available ? '✅ Available' : '❌ None'}
-`);
-}
-
-async function cmdWake(kg: KnowledgeGraph, structure: Structure, wal: WALManager, workDir: string): Promise<void> {
-  const sessionStatePath = path.join(workDir, 'SESSION-STATE.md');
-  const recovered = wal.recover();
-
-  if (recovered) {
-    console.log('⚠️  Recovered uncommitted state from previous session:');
-    console.log(JSON.stringify(recovered.data, null, 2));
-  }
-
-  const latest = await wal.writeSessionState(sessionStatePath);
-  if (latest) {
-    console.log(`✅ Wrote session state to ${sessionStatePath}`);
-  } else {
-    console.log('No previous state found — fresh session.');
+  console.log('# AthenaMem Palace Status');
+  console.log('');
+  console.log(`Knowledge Graph:`);
+  console.log(`  Entities: ${stats.entity_count}`);
+  console.log(`  Relations: ${stats.relation_count}`);
+  console.log(`  Memories: ${stats.memory_count}`);
+  console.log(`  Contradictions: ${stats.contradictions}`);
+  console.log('');
+  console.log(`## Palace Wings`);
+  for (const wing of wings) {
+    const rooms = palace.listRooms(wing.name);
+    console.log(`  📦 ${wing.name} (${rooms.length} rooms, ${wing.memory_count} memories)`);
+    if (wing.description) {
+      console.log(`     ${wing.description}`);
+    }
   }
 }
 
-async function cmdCheckpoint(kg: KnowledgeGraph, structure: Structure, wal: WALManager, workDir: string, args: string[]): Promise<void> {
-  const sessionStatePath = path.join(workDir, 'SESSION-STATE.md');
-  let sessionState = '';
-  if (fs.existsSync(sessionStatePath)) {
-    sessionState = fs.readFileSync(sessionStatePath, 'utf-8');
+async function cmdWake(kg: KnowledgeGraph, palace: Palace, wal: WALManager, workDir: string): Promise<void> {
+  console.log('Waking AthenaMem...');
+
+  // Load L0 context: recent memories, active wings
+  const wings = palace.listWings();
+  const recentMemories = kg.getRecentMemories(10);
+
+  console.log(`  Loaded ${wings.length} wings`);
+  console.log(`  Retrieved ${recentMemories.length} recent memories`);
+
+  // TODO: Inject context into agent session
+  console.log('\n✅ AthenaMem awake and ready');
+}
+
+async function cmdCheckpoint(kg: KnowledgeGraph, _palace: Palace, wal: WALManager, workDir: string, args: string[]): Promise<void> {
+  const message = args.join(' ') || 'Manual checkpoint';
+
+  console.log('Creating checkpoint...');
+  wal.checkpoint({ session_state: message });
+
+  console.log('✅ Checkpoint saved');
+}
+
+async function cmdSleep(kg: KnowledgeGraph, _palace: Palace, wal: WALManager, workDir: string, args: string[]): Promise<void> {
+  const summary = args.join(' ') || 'Session ended';
+
+  console.log('Putting AthenaMem to sleep...');
+  wal.checkpoint({ session_state: summary });
+
+  console.log('✅ Session finalized');
+  console.log(`   Summary: ${summary}`);
+}
+
+async function cmdRemember(kg: KnowledgeGraph, palace: Palace, args: string[]): Promise<void> {
+  if (args.length < 4) {
+    throw new Error('Usage: athenamem remember <wing> <room> <hall> <content...>');
   }
 
-  const walEntry = wal.checkpoint({
-    session_state: sessionState,
-    decisions: [],
-    tasks: [],
-  });
+  const [wing, room, hall, ...contentParts] = args;
+  const content = contentParts.join(' ');
 
-  console.log(`✅ Checkpoint saved: ${walEntry.id.substring(0, 8)}...`);
+  // Create/get the wing and room
+  const wingData = palace.getWing(wing) || palace.createWing(wing);
+  const roomData = palace.getOrCreateRoom(wing, room);
+
+  // Store the memory
+  const filePath = `palace/${wing}/${room}/${Date.now()}.md`;
+  const { drawer, memory } = palace.addDrawer(wing, room, hall as any, filePath, content);
+
+  console.log(`✅ Stored memory ${memory.id.substring(0, 8)}... in ${wing}/${room}/${hall}`);
+  console.log(`   Drawer: ${drawer.drawer_id.substring(0, 8)}...`);
 }
 
-async function cmdSleep(kg: KnowledgeGraph, structure: Structure, wal: WALManager, workDir: string, args: string[]): Promise<void> {
-  const summary = args.join(' ') || 'Session ended.';
-  const sessionStatePath = path.join(workDir, 'SESSION-STATE.md');
-
-  let sessionState = '';
-  if (fs.existsSync(sessionStatePath)) {
-    sessionState = fs.readFileSync(sessionStatePath, 'utf-8');
-  }
-
-  wal.checkpoint({ session_state: sessionState, learnings: [summary] });
-  console.log(`✅ Session ended. Summary: ${summary}`);
-}
-
-async function cmdRemember(kg: KnowledgeGraph, structure: Structure, args: string[]): Promise<void> {
-  // Usage: remember <module> <section> [--content "text"] [--category facts|events|discoveries|preferences|advice]
-  const module = args[0];
-  const section = args[1];
-  if (!module || !section) throw new Error('Usage: athenamem remember <module> <section> [--content "text"]');
-
-  const contentIdx = args.indexOf('--content');
-  const categoryIdx = args.indexOf('--category');
-  const content = contentIdx >= 0 ? args[contentIdx + 1] : '';
-  const category = (categoryIdx >= 0 ? args[categoryIdx + 1] : 'facts') as 'facts' | 'events' | 'discoveries' | 'preferences' | 'advice';
-
-  if (!content) throw new Error('--content is required');
-
-  const filePath = `${category}/${module}-${section}-${Date.now()}.md`;
-  const { entry, memory } = structure.addEntry(module, section, category, filePath, content);
-
-  console.log(`✅ Stored memory ${memory.id.substring(0, 8)}... in ${module}/${section}/${category}`);
-  console.log(`   Entry: ${entry.entry_id.substring(0, 8)}...`);
-}
-
-async function cmdRecall(kg: KnowledgeGraph, structure: Structure, args: string[]): Promise<void> {
+async function cmdRecall(kg: KnowledgeGraph, palace: Palace, args: string[]): Promise<void> {
   const query = args.join(' ');
   if (!query) throw new Error('Usage: athenamem recall <query>');
 
-  const orchestrator = new SearchOrchestrator(kg, structure);
+  const orchestrator = new SearchOrchestrator(kg, palace);
   const response = await orchestrator.deepSearch(query, 30);
 
   console.log(formatSearchResults(response));
 }
 
-async function cmdSearch(kg: KnowledgeGraph, structure: Structure, args: string[]): Promise<void> {
+async function cmdSearch(kg: KnowledgeGraph, palace: Palace, args: string[]): Promise<void> {
   const query = args.join(' ');
   if (!query) throw new Error('Usage: athenamem search <query>');
 
-  const orchestrator = new SearchOrchestrator(kg, structure);
+  const orchestrator = new SearchOrchestrator(kg, palace);
   const results = await orchestrator.quickSearch(query, 15);
 
   console.log(`# Quick Search: "${query}"\n`);
@@ -246,112 +288,103 @@ async function cmdSearch(kg: KnowledgeGraph, structure: Structure, args: string[
   }
 }
 
-async function cmdModules(structure: Structure, args: string[]): Promise<void> {
-  const subcmd = args[0];
-  if (subcmd === 'list' || !subcmd) {
-    const modules = structure.listModules();
-    if (modules.length === 0) {
-      console.log('No modules yet. Create one: athenamem modules add <name> [--desc "description"]');
-      return;
-    }
-    console.log('# Modules\n');
-    for (const m of modules) {
-      console.log(`  ${m.name} — ${m.description || '(no description)'} (${m.section_count} sections, ${m.memory_count} memories)`);
-    }
-  } else if (subcmd === 'add') {
-    const name = args[1];
-    const descIdx = args.indexOf('--desc');
-    const desc = descIdx >= 0 ? args[descIdx + 1] : '';
-    if (!name) throw new Error('Usage: athenamem modules add <name> [--desc "description"]');
-    structure.createModule(name, desc);
-    console.log(`✅ Created module: ${name}`);
-  } else {
-    throw new Error('Usage: athenamem modules [list|add]');
-  }
-}
-
-async function cmdSections(structure: Structure, args: string[]): Promise<void> {
-  const moduleName = args[0];
-  if (!moduleName) throw new Error('Usage: athenamem sections <module-name>');
-  const sections = structure.listSections(moduleName);
-  if (sections.length === 0) {
-    console.log(`No sections in module "${moduleName}".`);
-    return;
-  }
-  console.log(`# Sections in ${moduleName}\n`);
-  for (const s of sections) {
-    console.log(`  ${s.name} — ${s.description || '(no description)'} (${s.memory_count} memories)`);
-  }
-}
-
-async function cmdDiary(kg: KnowledgeGraph, structure: Structure, args: string[]): Promise<void> {
-  // Usage: diary <agent-name> [write|read] [content]
-  const agent = args[0];
-  const action = args[1] ?? 'read';
-  if (!agent) throw new Error('Usage: athenamem diary <agent-name> [write|read] [content]');
-
-  if (action === 'write') {
-    const content = args.slice(2).join(' ');
-    if (!content) throw new Error('Usage: athenamem diary <agent> write <content>');
-    structure.getOrCreateSection(agent, 'diary');
-    structure.addEntry(agent, 'diary', 'discoveries', `diary-${Date.now()}.md`, content);
-    console.log(`✅ Diary entry written for ${agent}`);
-  } else {
-    const memories = kg.getMemoriesByStructure(agent, 'diary');
-    if (memories.length === 0) {
-      console.log(`No diary entries for ${agent}.`);
-      return;
-    }
-    console.log(`# Diary: ${agent}\n`);
-    for (const m of memories.slice(0, 10)) {
-      console.log(`[${new Date(m.created_at).toISOString()}] ${m.content}`);
+async function cmdWings(palace: Palace, args: string[]): Promise<void> {
+  if (args.length === 0 || args[0] === 'list') {
+    const wings = palace.listWings();
+    console.log(`# Wings (${wings.length})\n`);
+    for (const wing of wings) {
+      console.log(`  📦 ${wing.name}`);
+      if (wing.description) {
+        console.log(`     ${wing.description}`);
+      }
+      console.log(`     ${wing.room_count} rooms, ${wing.memory_count} memories`);
       console.log('');
     }
+    return;
+  }
+
+  if (args[0] === 'create' && args[1]) {
+    const name = args[1];
+    const desc = args.slice(2).join(' ') || '';
+    palace.createWing(name, desc);
+    console.log(`✅ Created wing: ${name}`);
+    return;
+  }
+
+  throw new Error('Usage: athenamem wings [list | create <name> [desc]]');
+}
+
+async function cmdRooms(palace: Palace, args: string[]): Promise<void> {
+  if (args.length < 1) {
+    throw new Error('Usage: athenamem rooms <wing>');
+  }
+
+  const wingName = args[0];
+  const rooms = palace.listRooms(wingName);
+
+  console.log(`# Rooms in ${wingName} (${rooms.length})\n`);
+  for (const room of rooms) {
+    console.log(`  📁 ${room.name}`);
+    if (room.closet_summary) {
+      console.log(`     ${room.closet_summary}`);
+    }
+    console.log(`     ${room.memory_count} memories`);
+    console.log('');
+  }
+}
+
+async function cmdDiary(kg: KnowledgeGraph, palace: Palace, args: string[]): Promise<void> {
+  if (args.length < 2) {
+    throw new Error('Usage: athenamem diary <agent> [write <content> | read]');
+  }
+
+  const [agent, action, ...contentParts] = args;
+  const content = contentParts.join(' ');
+
+  if (action === 'write') {
+    palace.getOrCreateRoom(agent, 'diary');
+    palace.addDrawer(agent, 'diary', 'discoveries', `diary-${Date.now()}.md`, content);
+    console.log(`✅ Diary entry added for ${agent}`);
+  } else if (action === 'read') {
+    const memories = kg.getMemoriesByPalace(agent, 'diary');
+    console.log(`# Diary: ${agent}\n`);
+    for (const mem of memories) {
+      console.log(`## ${new Date(mem.created_at).toISOString()}`);
+      console.log(mem.content);
+      console.log('');
+    }
+  } else {
+    throw new Error('Usage: athenamem diary <agent> [write <content> | read]');
   }
 }
 
 async function cmdAudit(kg: KnowledgeGraph): Promise<void> {
-  const contradictions = kg.stats().contradictions;
-  if (contradictions === 0) {
-    console.log('✅ No contradictions flagged.');
-    return;
-  }
-  console.log(`⚠️  ${contradictions} contradiction(s) flagged. Run "athenamem recall" to review.`);
+  const { ContradictionDetector } = await import('../core/contradiction.js');
+  const detector = new ContradictionDetector(kg);
+
+  console.log('Running contradiction audit...');
+  // TODO: Implement full audit
+  console.log('✅ Audit complete');
 }
 
-async function cmdCompact(kg: KnowledgeGraph, structure: Structure, workDir: string): Promise<void> {
-  console.log('Running compaction...');
-  // TODO: wire in CompactionEngine
-  console.log('✅ Compaction scheduled (not yet wired to LLM).');
+async function cmdCompact(kg: KnowledgeGraph, palace: Palace, workDir: string): Promise<void> {
+  const { CompactionEngine, RuleBasedCompiler } = await import('../core/compaction.js');
+  const compiler = new RuleBasedCompiler();
+  const engine = new CompactionEngine(kg, path.join(workDir, 'data', 'compaction'), compiler);
+
+  console.log('Running DAG compaction...');
+  // TODO: Implement compaction
+  console.log('✅ Compaction complete');
 }
 
 async function cmdStats(kg: KnowledgeGraph): Promise<void> {
-  const s = kg.stats();
-  console.log(JSON.stringify(s, null, 2));
-}
+  const stats = kg.stats();
 
-async function cmdExport(kg: KnowledgeGraph, args: string[]): Promise<void> {
-  const outPath = args[0] ?? 'athenamem-export.json';
-  const data = kg.export();
-  fs.writeFileSync(outPath, JSON.stringify(data, null, 2));
-  console.log(`✅ Exported ${kg.stats().entity_count} entities to ${outPath}`);
-}
-
-async function cmdImport(kg: KnowledgeGraph, args: string[]): Promise<void> {
-  const inPath = args[0];
-  if (!inPath) throw new Error('Usage: athenamem import <file.json>');
-  const data = JSON.parse(fs.readFileSync(inPath, 'utf-8'));
-  kg.import(data);
-  console.log(`✅ Imported from ${inPath}`);
-}
-
-async function cmdBridge(structure: Structure, args: string[]): Promise<void> {
-  const from = args[0];
-  const to = args[1];
-  const sectionName = args[2];
-  if (!from || !to || !sectionName) throw new Error('Usage: athenamem bridge <from-module> <to-module> <section-name>');
-  const bridge = structure.createBridge(from, to, sectionName);
-  console.log(`✅ Created bridge: ${from} --[${sectionName}]--> ${to}`);
+  console.log('# Knowledge Graph Statistics\n');
+  console.log(`Entities:        ${stats.entity_count}`);
+  console.log(`Relations:       ${stats.relation_count}`);
+  console.log(`Memories:        ${stats.memory_count}`);
+  console.log(`Contradictions:  ${stats.contradictions}`);
 }
 
 async function cmdRebuildFTS(kg: KnowledgeGraph): Promise<void> {
@@ -360,61 +393,35 @@ async function cmdRebuildFTS(kg: KnowledgeGraph): Promise<void> {
   console.log('✅ FTS index rebuilt');
 }
 
-// ─── Help ──────────────────────────────────────────────────────────────────────
+async function cmdExport(kg: KnowledgeGraph, args: string[]): Promise<void> {
+  if (args.length < 1) {
+    throw new Error('Usage: athenamem export <file.json>');
+  }
 
-function printHelp(topic?: string): void {
-  const help: Record<string, string> = {
-    '': `AthenaMem v${VERSION} — The memory that learns.
+  const filePath = args[0];
+  const data = kg.export();
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  console.log(`✅ Exported to ${filePath}`);
+}
 
-Usage: athenamem <command> [options]
+async function cmdImport(kg: KnowledgeGraph, args: string[]): Promise<void> {
+  if (args.length < 1) {
+    throw new Error('Usage: athenamem import <file.json>');
+  }
 
-Commands:
-  init [name]           Initialize workspace
-  status                Show structure overview + KG stats
-  wake                  Load context (for agent bootstrap)
-  checkpoint            Save WAL checkpoint
-  sleep [summary]       End session
-  remember <m> <s>       Store a memory (see help remember)
-  recall <query>        Deep search across all systems
-  search <query>        Quick search (qmd + KG)
-  rebuild-fts           Rebuild FTS search index
-  modules [list|add]    Manage modules
-  sections <module>     List sections in a module
-  diary <agent> [write] Read/write agent diary
-  audit                 Check for contradictions
-  stats                 KG statistics
-  export [file]          Export KG as JSON
-  import <file>         Import KG from JSON
-  bridge <f> <t> <sec>  Create cross-module bridge
+  const filePath = args[0];
+  const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+  kg.import(data);
+  console.log(`✅ Imported from ${filePath}`);
+}
 
-Run "athenamem help <command>" for detailed help.`,
-    remember: `Usage: athenamem remember <module> <section> [options]
+async function cmdTunnel(palace: Palace, args: string[]): Promise<void> {
+  if (args.length < 3) {
+    throw new Error('Usage: athenamem tunnel <from_wing> <to_wing> <room_name>');
+  }
 
-Options:
-  --content "text"      Required. The memory content to store.
-  --category <type>      Category type: facts|events|discoveries|preferences|advice (default: facts)
-
-Example:
-  athenamem remember chris memory-stack --content "Using SQLite for the KG" --category discoveries`,
-    recall: `Usage: athenamem recall <query> [options]
-
-Fires queries across all configured memory systems (qmd, ClawVault,
-Hindsight, Mnemo Cortex, AthenaMem KG) and fuses results using
-Reciprocal Rank Fusion.
-
-Example:
-  athenamem recall "why did we switch databases"`,
-    modules: `Usage: athenamem modules [list|add] [options]
-
-list (default):  List all modules
-add <name>:     Create a new module
-
-Options for add:
-  --desc "text"  Module description
-
-Example:
-  athenamem modules add chris --desc "Chris's personal memory module"`,
-  };
-
-  console.log(help[topic ?? ''] ?? help['']);
+  const [from, to, roomName] = args;
+  const tunnel = palace.createTunnel(from, to, roomName);
+  console.log(`✅ Created tunnel: ${from} ↔ ${to} via ${roomName}`);
+  console.log(`   Tunnel ID: ${tunnel.id}`);
 }

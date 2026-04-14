@@ -20,6 +20,8 @@ export interface Contradiction {
     existing_entity_id: string;
     severity: 'high' | 'medium' | 'low';
     reason: string;
+    memoryId?: string;
+    memory_id?: string;
 }
 export interface CheckResult {
     has_contradiction: boolean;

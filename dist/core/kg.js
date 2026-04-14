@@ -86,8 +86,15 @@ export class KnowledgeGraph {
         section TEXT NOT NULL,
         module TEXT NOT NULL,
         importance REAL NOT NULL DEFAULT 0.5,
+        
+        -- Contradiction tracking (actual conflicts)
         contradiction_flag INTEGER NOT NULL DEFAULT 0,
         contradiction_with TEXT,
+        
+        -- Memory lifecycle status (separate from contradictions)
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'invalidated', 'compacted', 'archived')),
+        valid_to INTEGER,
+        
         created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
         last_accessed INTEGER,
         access_count INTEGER NOT NULL DEFAULT 0
@@ -153,9 +160,29 @@ export class KnowledgeGraph {
       CREATE INDEX IF NOT EXISTS idx_memories_module_section ON memories(module, section);
       CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
       CREATE INDEX IF NOT EXISTS idx_memories_contradiction ON memories(contradiction_flag) WHERE contradiction_flag = 1;
+      CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';
       CREATE INDEX IF NOT EXISTS idx_entries_module ON entries(module);
       CREATE INDEX IF NOT EXISTS idx_drawers_wing ON drawers(wing);
     `);
+        // Run migrations for existing databases
+        this.migrate();
+    }
+    /**
+     * Database migrations for schema updates.
+     */
+    migrate() {
+        // Migration: Add status and valid_to columns if they don't exist
+        try {
+            this.db.exec(`
+        ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active' 
+        CHECK (status IN ('active', 'invalidated', 'compacted', 'archived'));
+      `);
+            this.db.exec(`ALTER TABLE memories ADD COLUMN valid_to INTEGER;`);
+            this.db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';`);
+        }
+        catch (e) {
+            // Columns likely already exist, ignore error
+        }
     }
     // ─── Entity Operations ──────────────────────────────────────────────────────
     /**
@@ -243,6 +270,15 @@ export class KnowledgeGraph {
         return this.db.prepare(sql).all(...params);
     }
     /**
+     * Get all relations where source matches a memory ID.
+     * This is used to trace facts derived from a specific memory.
+     */
+    getRelationsBySource(sourceId) {
+        return this.db.prepare(`
+      SELECT * FROM relations WHERE source = ?
+    `).all(sourceId);
+    }
+    /**
      * Get all facts about an entity — both incoming and outgoing relations.
      */
     getEntityFacts(entityId, asOf = Date.now()) {
@@ -264,12 +300,13 @@ export class KnowledgeGraph {
         const id = uuidv4();
         const now = Date.now();
         this.db.prepare(`
-      INSERT INTO memories (id, entry_id, content, summary, memory_type, section, module, importance, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, entry_id, content, summary, memory_type, section, module, importance, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
     `).run(id, entryId, content, summary, memoryType, section, module, importance, now);
         return {
             id, entry_id: entryId, content, summary, memory_type: memoryType,
             section, module, importance, contradiction_flag: false, contradiction_with: null,
+            status: 'active', valid_to: null,
             created_at: now, last_accessed: null, access_count: 0
         };
     }
@@ -410,6 +447,20 @@ export class KnowledgeGraph {
         return this.db.prepare('SELECT * FROM entries WHERE file_path = ?').get(filePath) ?? null;
     }
     /**
+     * Get entry by ID.
+     */
+    getEntryById(entryId) {
+        return this.db.prepare('SELECT * FROM entries WHERE entry_id = ?').get(entryId) ?? null;
+    }
+    /**
+     * Get memories by entry ID (for drawer invalidation).
+     */
+    getMemoriesByEntryId(entryId) {
+        return this.db.prepare(`
+      SELECT * FROM memories WHERE entry_id = ? ORDER BY created_at DESC
+    `).all(entryId);
+    }
+    /**
      * Legacy method: Get drawer by path.
      */
     getDrawer(filePath) {
@@ -534,6 +585,61 @@ export class KnowledgeGraph {
             }
         });
         txn();
+    }
+    /**
+     * Update memory salience score.
+     */
+    updateMemorySalience(memoryId, salience) {
+        this.db.prepare(`
+      UPDATE memories SET importance = ? WHERE id = ?
+    `).run(salience, memoryId);
+    }
+    /**
+     * Update memory access count and last_accessed.
+     */
+    touchMemory(memoryId) {
+        const now = Date.now();
+        this.db.prepare(`
+      UPDATE memories 
+      SET access_count = COALESCE(access_count, 0) + 1, 
+          last_accessed = ? 
+      WHERE id = ?
+    `).run(now, memoryId);
+    }
+    /**
+     * Invalidate a memory — mark it as no longer current.
+     * Separate from contradiction (which marks an actual conflict).
+     */
+    invalidateMemory(memoryId, reason, ended = Date.now()) {
+        this.db.prepare(`
+      UPDATE memories 
+      SET status = 'invalidated', 
+          valid_to = ?,
+          summary = COALESCE(summary, '') || ' [invalidated: ' || ? || ']'
+      WHERE id = ?
+    `).run(ended, reason, memoryId);
+    }
+    /**
+     * Get a memory by ID.
+     */
+    getMemoryById(memoryId) {
+        return this.db.prepare('SELECT * FROM memories WHERE id = ?').get(memoryId) ?? null;
+    }
+    /**
+     * Get recent memories across all wings/rooms.
+     */
+    getRecentMemories(limit = 10) {
+        return this.db.prepare(`
+      SELECT * FROM memories ORDER BY created_at DESC LIMIT ?
+    `).all(limit);
+    }
+    /**
+     * Get memories by status (for compaction, cleanup).
+     */
+    getMemoriesByStatus(status, limit = 1000) {
+        return this.db.prepare(`
+      SELECT * FROM memories WHERE status = ? ORDER BY created_at DESC LIMIT ?
+    `).all(status, limit);
     }
 }
 //# sourceMappingURL=kg.js.map

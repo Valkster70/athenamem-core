@@ -808,6 +808,22 @@ export class KnowledgeGraph {
   }
 
   /**
+   * Get a memory by ID.
+   */
+  getMemoryById(memoryId: string): Memory | null {
+    return this.db.prepare('SELECT * FROM memories WHERE id = ?').get(memoryId) as Memory | undefined ?? null;
+  }
+
+  /**
+   * Get recent memories across all wings/rooms.
+   */
+  getRecentMemories(limit: number = 10): Memory[] {
+    return this.db.prepare(`
+      SELECT * FROM memories ORDER BY created_at DESC LIMIT ?
+    `).all(limit) as Memory[];
+  }
+
+  /**
    * Get memories by status (for compaction, cleanup).
    */
   getMemoriesByStatus(status: Memory['status'], limit: number = 1000): Memory[] {

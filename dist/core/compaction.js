@@ -129,10 +129,42 @@ export class CompactionEngine {
             .filter(n => n.level === 3)
             .sort((a, b) => b.access_count - a.access_count);
     }
+    /**
+     * Schedule compaction with salience-aware policy.
+     *
+     * NEVER compact:
+     * - Very high-salience items (salience >= 0.75)
+     * - Unresolved contradictions
+     * - Recent active project decisions
+     *
+     * PRIORITIZE compacting:
+     * - Older low-access memories
+     * - Repetitive discoveries
+     * - Resolved/invalidated items
+     */
     scheduleCompaction(memories) {
         const toCompact = [];
         const byLocation = new Map();
-        for (const m of memories) {
+        // Filter out protected memories
+        const candidates = memories.filter(m => {
+            // Never compact high-salience
+            if (m.importance >= 0.75)
+                return false;
+            // Never compact contradictions
+            if (m.contradiction_flag)
+                return false;
+            // Never compact invalidated
+            if (m.status !== 'active')
+                return false;
+            // Never compact recent access (< 7 days)
+            if (m.last_accessed && Date.now() - m.last_accessed < 7 * 24 * 60 * 60 * 1000)
+                return false;
+            return true;
+        });
+        const protected_count = memories.length - candidates.length;
+        const high_salience = memories.filter(m => m.importance >= 0.75).length;
+        const contradictions = memories.filter(m => m.contradiction_flag).length;
+        for (const m of candidates) {
             const key = `${m.module}::${m.section}`;
             if (!byLocation.has(key))
                 byLocation.set(key, []);
@@ -141,7 +173,15 @@ export class CompactionEngine {
         for (const [, mems] of byLocation) {
             if (mems.length < 3)
                 continue;
-            mems.sort((a, b) => b.importance - a.importance || b.access_count - a.access_count);
+            // Sort: low importance first, low access first = better compaction candidates
+            mems.sort((a, b) => {
+                // Prioritize: low salience > old > low access
+                if (a.importance !== b.importance)
+                    return a.importance - b.importance;
+                if (a.created_at !== b.created_at)
+                    return a.created_at - b.created_at;
+                return (a.access_count ?? 0) - (b.access_count ?? 0);
+            });
             if (mems.length >= 10) {
                 toCompact.push({ ids: mems.slice(0, 5).map(m => m.id), level: 3 });
             }
@@ -152,7 +192,16 @@ export class CompactionEngine {
                 toCompact.push({ ids: mems.map(m => m.id), level: 1 });
             }
         }
-        return { toCompact, stats: this.stats() };
+        return {
+            toCompact,
+            stats: this.stats(),
+            policy: {
+                protected_count,
+                high_salience,
+                contradictions,
+                candidates: candidates.length,
+            },
+        };
     }
     stats() {
         const byLevel = { 0: 0, 1: 0, 2: 0, 3: 0 };

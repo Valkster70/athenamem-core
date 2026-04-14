@@ -25,6 +25,8 @@ export interface Contradiction {
   existing_entity_id: string;
   severity: 'high' | 'medium' | 'low';
   reason: string;
+  memoryId?: string; // Associated memory ID that triggered this contradiction
+  memory_id?: string; // Alternative field name for compatibility
 }
 
 export interface CheckResult {

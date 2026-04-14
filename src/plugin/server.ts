@@ -21,8 +21,8 @@ import { WALManager, WALEntry } from '../core/wal.js';
 import { ContradictionDetector, extractFacts, checkAndFlagContradictions } from '../core/contradiction.js';
 import { CompactionEngine, RuleBasedCompiler } from '../core/compaction.js';
 import { SearchOrchestrator, SearchResult, SearchResponse } from '../search/orchestrator.js';
-import { MemoryEvent, CategoryType, MemorySource } from '../core/event.js';
-import { ingestMemoryEvent, IngestionResult } from '../core/ingestion.js';
+import { MemoryEvent, CategoryType, MemorySource, IngestionResult } from '../core/event.js';
+import { ingestMemoryEvent } from '../core/ingestion.js';
 import { traceMemory, explainRecall } from '../core/debug.js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -785,7 +785,7 @@ export async function toolExplainRecall(
   const memories: Array<{ memory: Memory; score: number; sourceScores: Record<string, number>; matched_keywords: string[] }> = [];
   
   for (const id of resultMemoryIds) {
-    const memory = c.kg.getMemory(id);
+    const memory = c.kg.getMemoryById(id);
     if (memory) {
       memories.push({
         memory,

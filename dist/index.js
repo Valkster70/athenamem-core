@@ -26,7 +26,7 @@ const AddDrawerSchema = Type.Object({
     filePath: Type.Optional(Type.String()),
 });
 const DeleteDrawerSchema = Type.Object({
-    drawerId: Type.String(),
+    entryId: Type.String(),
 });
 const KgQuerySchema = Type.Object({
     entityId: Type.Optional(Type.String()),
@@ -36,11 +36,21 @@ const KgAddSchema = Type.Object({
     subject: Type.String(),
     predicate: Type.String(),
     object: Type.String(),
+    subjectType: Type.Optional(Type.String()),
+    objectType: Type.Optional(Type.String()),
+    sourceMemoryId: Type.Optional(Type.String()),
     confidence: Type.Optional(Type.Number()),
     metadata: Type.Optional(Type.Record(Type.String(), Type.Any())),
 });
 const KgInvalidateSchema = Type.Object({
-    entityId: Type.String(),
+    id: Type.String(),
+    type: Type.Optional(Type.Union([Type.Literal("memory"), Type.Literal("entity")])),
+    reason: Type.Optional(Type.Union([
+        Type.Literal("user_deleted"),
+        Type.Literal("expired"),
+        Type.Literal("superseded"),
+        Type.Literal("error"),
+    ])),
     ended: Type.Optional(Type.Number()),
 });
 const KgTimelineSchema = Type.Object({
@@ -77,8 +87,8 @@ const RecallSchema = Type.Object({
 });
 // ─── Plugin definition ─────────────────────────────────────────────────────────
 const athenamem = definePluginEntry({
-    id: "athenamem",
-    name: "AthenaMem",
+    id: "athenamem-core",
+    name: "AthenaMem Core",
     description: "Biomimetic memory stack — palace architecture, WAL enforcement, " +
         "contradiction detection, DAG compaction, cross-system recall.",
     configSchema: {
@@ -208,7 +218,7 @@ const athenamem = definePluginEntry({
             description: "Delete a drawer by ID. Memories are retained for KG integrity.",
             parameters: DeleteDrawerSchema,
             async execute(_, params) {
-                const result = await toolDeleteDrawer(String(params.drawerId));
+                const result = await toolDeleteDrawer(String(params.entryId));
                 return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
             },
         });
@@ -226,7 +236,7 @@ const athenamem = definePluginEntry({
             description: "Add a subject–predicate–object fact to the KG with confidence score.",
             parameters: KgAddSchema,
             async execute(_, params) {
-                const result = await toolKgAdd(String(params.subject), String(params.predicate), String(params.object), params.confidence != null ? Number(params.confidence) : 1.0, params.metadata != null ? params.metadata : {});
+                const result = await toolKgAdd(String(params.subject), String(params.predicate), String(params.object), params.confidence != null ? Number(params.confidence) : 1.0, params.subjectType != null ? String(params.subjectType) : undefined, params.objectType != null ? String(params.objectType) : undefined, params.sourceMemoryId != null ? String(params.sourceMemoryId) : undefined, params.metadata != null ? params.metadata : {});
                 return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
             },
         });
@@ -235,7 +245,7 @@ const athenamem = definePluginEntry({
             description: "Invalidate an entity as of a timestamp.",
             parameters: KgInvalidateSchema,
             async execute(_, params) {
-                const result = await toolKgInvalidate(String(params.entityId), params.ended != null ? Number(params.ended) : undefined);
+                const result = await toolKgInvalidate(String(params.id), params.type != null ? String(params.type) : undefined, params.reason != null ? String(params.reason) : undefined, params.ended != null ? Number(params.ended) : undefined);
                 return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
             },
         });

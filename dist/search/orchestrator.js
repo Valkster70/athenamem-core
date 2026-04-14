@@ -38,14 +38,14 @@ function reciprocalRankFusion(rankedLists, k = 60) {
 // ─── SearchOrchestrator Class ─────────────────────────────────────────────────
 export class SearchOrchestrator {
     kg;
-    structure;
+    palace;
     qmdPath;
     clawvaultPath;
     hindsightUrl;
     mnemoUrl;
-    constructor(kg, structure, opts = {}) {
+    constructor(kg, palace, opts = {}) {
         this.kg = kg;
-        this.structure = structure;
+        this.palace = palace;
         this.qmdPath = opts.qmdPath ?? `${process.env.HOME}/.cache/qmd`;
         this.clawvaultPath = opts.clawvaultPath ?? `${process.env.HOME}/.openclaw/workspace/memory`;
         this.hindsightUrl = opts.hindsightUrl ?? 'http://127.0.0.1:8888';
@@ -266,23 +266,18 @@ export class SearchOrchestrator {
         const map = new Map();
         for (let i = 0; i < results.length; i++) {
             const r = results[i];
-            map.set(r.id, { source: r.source, rank: i + 1, score: r.score ?? 0 });
+            map.set(r.id, { source: r.source, rank: i + 1, score: r.score ?? 0, result: r });
         }
         return map;
     }
     findResultById(rankedLists, id) {
-        for (const list of rankedLists) {
-            const entry = list.get(id);
+        for (const map of rankedLists) {
+            const entry = map.get(id);
             if (entry) {
-                // Can't easily recover original result from here without storing it
-                // Return a placeholder — will be refined
                 return {
-                    id,
-                    content: '',
-                    source: entry.source,
-                    source_name: entry.source,
-                    score: entry.score,
+                    ...entry.result,
                     rank: entry.rank,
+                    score: entry.score,
                 };
             }
         }

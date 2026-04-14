@@ -69,7 +69,7 @@ export async function traceMemory(
   palace: Palace,
   wal: WALManager
 ): Promise<MemoryTrace | null> {
-  const memory = kg.getMemory(memoryId);
+  const memory = kg.getMemoryById(memoryId);
   if (!memory) return null;
 
   // Get entry info

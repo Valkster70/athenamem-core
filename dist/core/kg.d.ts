@@ -47,6 +47,8 @@ export interface Memory {
     importance: number;
     contradiction_flag: boolean;
     contradiction_with: string | null;
+    status: 'active' | 'invalidated' | 'compacted' | 'archived';
+    valid_to: number | null;
     created_at: number;
     last_accessed: number | null;
     access_count: number;
@@ -89,6 +91,10 @@ export declare class KnowledgeGraph {
     constructor(dbPath: string);
     private init;
     /**
+     * Database migrations for schema updates.
+     */
+    private migrate;
+    /**
      * Add a new entity. If one with the same name+type already exists and is active,
      * returns the existing entity instead of creating a duplicate.
      */
@@ -115,6 +121,11 @@ export declare class KnowledgeGraph {
      * Query relations. Supports temporal filtering.
      */
     queryRelations(subjectId?: string, predicate?: Predicate, asOf?: number): Relation[];
+    /**
+     * Get all relations where source matches a memory ID.
+     * This is used to trace facts derived from a specific memory.
+     */
+    getRelationsBySource(sourceId: string): Relation[];
     /**
      * Get all facts about an entity — both incoming and outgoing relations.
      */
@@ -166,6 +177,14 @@ export declare class KnowledgeGraph {
      */
     getEntry(filePath: string): Entry | null;
     /**
+     * Get entry by ID.
+     */
+    getEntryById(entryId: string): Entry | null;
+    /**
+     * Get memories by entry ID (for drawer invalidation).
+     */
+    getMemoriesByEntryId(entryId: string): Memory[];
+    /**
      * Legacy method: Get drawer by path.
      */
     getDrawer(filePath: string): Drawer | null;
@@ -203,5 +222,30 @@ export declare class KnowledgeGraph {
         entries?: Entry[];
         drawers?: Drawer[];
     }): void;
+    /**
+     * Update memory salience score.
+     */
+    updateMemorySalience(memoryId: string, salience: number): void;
+    /**
+     * Update memory access count and last_accessed.
+     */
+    touchMemory(memoryId: string): void;
+    /**
+     * Invalidate a memory — mark it as no longer current.
+     * Separate from contradiction (which marks an actual conflict).
+     */
+    invalidateMemory(memoryId: string, reason: 'user_deleted' | 'expired' | 'superseded' | 'error', ended?: number): void;
+    /**
+     * Get a memory by ID.
+     */
+    getMemoryById(memoryId: string): Memory | null;
+    /**
+     * Get recent memories across all wings/rooms.
+     */
+    getRecentMemories(limit?: number): Memory[];
+    /**
+     * Get memories by status (for compaction, cleanup).
+     */
+    getMemoriesByStatus(status: Memory['status'], limit?: number): Memory[];
 }
 //# sourceMappingURL=kg.d.ts.map

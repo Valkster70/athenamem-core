@@ -14,13 +14,17 @@
  * Results are fused, deduplicated, and optionally reranked by LLM.
  */
 import { KnowledgeGraph } from '../core/kg.js';
-import { Structure } from '../core/structure.js';
+import { Palace } from '../core/palace.js';
 export interface SearchResult {
     id: string;
     content: string;
     source: SearchSource;
     source_name: string;
     score: number;
+    sourceScores?: Record<string, number>;
+    salience?: number;
+    valid?: boolean;
+    contradicted?: boolean;
     rank?: number;
     module?: string;
     section?: string;
@@ -29,12 +33,16 @@ export interface SearchResult {
     timestamp?: number;
     url?: string;
     entry_id?: string;
+    extractedFrom?: string;
+    contradictionWith?: string[];
 }
 export type SearchSource = 'qmd' | 'clawvault' | 'hindsight' | 'mnemo' | 'kg' | 'athenamem';
 export interface SearchOptions {
     query: string;
     module?: string;
     section?: string;
+    wing?: string;
+    room?: string;
     sources?: SearchSource[];
     limit?: number;
     fuseK?: number;
@@ -58,12 +66,12 @@ export interface SearchResponse {
 }
 export declare class SearchOrchestrator {
     private kg;
-    private structure;
+    private palace;
     private qmdPath;
     private clawvaultPath;
     private hindsightUrl;
     private mnemoUrl;
-    constructor(kg: KnowledgeGraph, structure: Structure, opts?: {
+    constructor(kg: KnowledgeGraph, palace: Palace, opts?: {
         qmdPath?: string;
         clawvaultPath?: string;
         hindsightUrl?: string;

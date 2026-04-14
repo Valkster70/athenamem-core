@@ -17,9 +17,11 @@
 import { KnowledgeGraph } from '../core/kg.js';
 import { Palace } from '../core/palace.js';
 import { WALManager } from '../core/wal.js';
-import { ContradictionDetector, extractFacts, checkAndFlagContradictions } from '../core/contradiction.js';
+import { ContradictionDetector, extractFacts } from '../core/contradiction.js';
 import { CompactionEngine, RuleBasedCompiler } from '../core/compaction.js';
 import { SearchOrchestrator } from '../search/orchestrator.js';
+import { ingestMemoryEvent } from '../core/ingestion.js';
+import { traceMemory, explainRecall } from '../core/debug.js';
 import * as fs from 'fs';
 import * as path from 'path';
 let ctx = null;
@@ -36,13 +38,13 @@ export async function init(config = {}) {
     const home = process.env.HOME ?? '/home/chris';
     const workDir = path.join(home, '.openclaw', 'workspace', 'athenamem');
     const cfg = {
-        data_dir: (config.data_dir && config.data_dir.startsWith("~")) ? expandPath(config.data_dir) : (config.data_dir ?? path.join(workDir, 'data')),
-        palace_dir: (config.palace_dir && config.palace_dir.startsWith("~")) ? expandPath(config.palace_dir) : (config.palace_dir ?? path.join(workDir, 'palace')),
+        data_dir: config.data_dir ?? path.join(workDir, 'data'),
+        palace_dir: config.palace_dir ?? path.join(workDir, 'palace'),
         compact_on_flush: config.compact_on_flush ?? true,
         contradiction_check: config.contradiction_check ?? true,
         auto_wal: config.auto_wal ?? true,
-        qmd_path: (config.qmd_path && config.qmd_path.startsWith("~")) ? expandPath(config.qmd_path) : (config.qmd_path ?? path.join(home, '.cache', 'qmd')),
-        clawvault_path: (config.clawvault_path && config.clawvault_path.startsWith("~")) ? expandPath(config.clawvault_path) : (config.clawvault_path ?? path.join(home, '.openclaw', 'workspace', 'memory')),
+        qmd_path: config.qmd_path ?? path.join(home, '.cache', 'qmd'),
+        clawvault_path: config.clawvault_path ?? path.join(home, '.openclaw', 'workspace', 'memory'),
         hindsight_url: config.hindsight_url ?? 'http://127.0.0.1:8888',
         mnemo_url: config.mnemo_url ?? 'http://127.0.0.1:50001',
     };
@@ -177,6 +179,35 @@ export async function onFlush() {
     const frontier = c.compaction.getActiveFrontier();
     return { compacted, new_frontier_nodes: frontier.length };
 }
+// ─── Unified Ingestion Pipeline ────────────────────────────────────────────────
+/**
+ * Unified memory ingestion — THE single entry point for all memory writes.
+ *
+ * All tools that create memory must use this function.
+ * It provides durability, auditability, salience scoring, and KG updates.
+ */
+export async function ingestMemory(module, section, category, content, options = {}) {
+    const c = getContext();
+    const event = {
+        sessionId: c.sessionId,
+        agentId: c.agentId,
+        moduleName: module,
+        sectionName: section,
+        category,
+        content,
+        source: options.source ?? 'tool',
+        confidence: options.confidence ?? 1.0,
+        salience: 0.5, // Will be computed by pipeline
+        provenance: {
+            triggerTool: options.provenance?.triggerTool,
+            filePath: options.filePath,
+            parentMemoryIds: options.provenance?.parentMemoryIds,
+        },
+    };
+    return ingestMemoryEvent(c, event, {
+        skipContradictionCheck: options.skipContradictionCheck,
+    });
+}
 // ─── MCP Tools ─────────────────────────────────────────────────────────────────
 /**
  * athenamem_status — L0-L4 overview + AAAK spec.
@@ -193,7 +224,7 @@ export async function toolStatus() {
         '## Knowledge Graph',
         `  Entities: ${stats.entity_count} (${stats.active_entities} active)`,
         `  Relations: ${stats.relation_count}`,
-        `  Memories: ${stats.memory_count} | Drawers: ${stats.drawer_count}`,
+        `  Memories: ${stats.memory_count} | Entries: ${stats.entry_count}`,
         `  Contradictions: ${stats.contradictions}`,
         '',
         '## Palace',
@@ -267,29 +298,49 @@ export async function toolGetAaakSpec() {
     ].join('\n');
 }
 /**
- * athenamem_add_drawer — store verbatim content.
+ * athenamem_add_drawer — store verbatim content (unified ingestion).
  */
 export async function toolAddDrawer(wingName, roomName, hall, content, filePath) {
-    const c = getContext();
-    const fp = filePath ?? `${hall}/${wingName}-${roomName}-${Date.now()}.md`;
-    const { drawer, memory } = c.palace.addDrawer(wingName, roomName, hall, fp, content);
-    // Check for contradictions
-    if (c.config.contradiction_check) {
-        const result = checkAndFlagContradictions(c.kg, memory, content);
-        if (result.has_contradiction) {
-            console.warn(`[AthenaMem] ${result.contradictions.length} contradiction(s) detected for ${memory.id}`);
-        }
-    }
-    return { drawer_id: drawer.drawer_id, memory_id: memory.id };
+    const category = mapHallToCategory(hall);
+    const result = await ingestMemory(wingName, roomName, category, content, {
+        source: 'tool',
+        filePath: filePath ?? `${hall}/${wingName}-${roomName}-${Date.now()}.md`,
+        provenance: { triggerTool: 'add_drawer' },
+    });
+    return {
+        drawer_id: result.drawerId ?? '',
+        memory_id: result.memoryId,
+        salience: result.salienceScore,
+    };
 }
 /**
- * athenamem_delete_drawer — remove by ID.
+ * Map hall type to category for ingestion.
  */
-export async function toolDeleteDrawer(drawerId) {
+function mapHallToCategory(hall) {
+    const mapping = {
+        'facts': 'general',
+        'events': 'system',
+        'discoveries': 'lesson',
+        'preferences': 'preference',
+        'advice': 'lesson',
+    };
+    return mapping[hall] ?? 'general';
+}
+/**
+ * athenamem_delete_drawer — invalidate memories by entry ID (soft delete).
+ *
+ * Memories are marked as invalidated rather than deleted to preserve audit trail.
+ */
+export async function toolDeleteDrawer(entryId) {
     const c = getContext();
-    // Mark all memories from this drawer as invalidated
-    // (we don't actually delete to preserve KG integrity)
-    return { deleted: true };
+    const memories = c.kg.getMemoriesByEntryId(entryId);
+    for (const memory of memories) {
+        c.kg.invalidateMemory(memory.id, 'user_deleted');
+    }
+    return {
+        deleted: true,
+        memories_invalidated: memories.length,
+    };
 }
 /**
  * athenamem_kg_query — entity relationships with time filtering.
@@ -301,21 +352,77 @@ export async function toolKgQuery(entityId, asOf) {
     return { entities, relations };
 }
 /**
- * athenamem_kg_add — add facts.
+ * athenamem_kg_add — add facts with proper entity typing.
+ *
+ * Defaults to 'person' for both entities if type not specified.
+ * Infers types from module/category context when possible.
  */
-export async function toolKgAdd(subject, predicate, object, confidence = 1.0, metadata = {}) {
+export async function toolKgAdd(subject, predicate, object, confidence = 1.0, subjectType, objectType, sourceMemoryId, metadata = {}) {
     const c = getContext();
-    const subjectEntity = c.kg.addEntity(subject, 'person');
-    const objectEntity = c.kg.addEntity(object, 'person');
-    const relation = c.kg.addRelation(subjectEntity.id, predicate, objectEntity.id, confidence);
-    return { entity_id: subjectEntity.id, relation_id: relation.id };
+    // Infer entity types if not provided
+    const inferredSubjectType = subjectType ?? inferEntityType(subject, 'person');
+    const inferredObjectType = objectType ?? inferEntityType(object, 'person');
+    const subjectEntity = c.kg.addEntity(subject, inferredSubjectType, metadata);
+    const objectEntity = c.kg.addEntity(object, inferredObjectType, metadata);
+    const relation = c.kg.addRelation(subjectEntity.id, predicate, objectEntity.id, confidence, sourceMemoryId ?? null);
+    return {
+        subject_entity_id: subjectEntity.id,
+        object_entity_id: objectEntity.id,
+        relation_id: relation.id,
+        inferred_types: { subject: inferredSubjectType, object: inferredObjectType },
+    };
 }
 /**
- * athenamem_kg_invalidate — mark entity/relation as ended.
+ * Infer entity type from name patterns and context.
  */
-export async function toolKgInvalidate(entityId, ended) {
-    getContext().kg.invalidateEntity(entityId, ended);
-    return { invalidated: true };
+function inferEntityType(name, defaultType = 'person') {
+    const lower = name.toLowerCase();
+    // Project indicators
+    if (/\b(app|project|system|service|api|bot|agent|tool)\b/.test(lower)) {
+        return 'project';
+    }
+    // Decision indicators
+    if (/\b(decision|choice|option|plan|strategy)\b/.test(lower)) {
+        return 'decision';
+    }
+    // Topic indicators
+    if (/\b(topic|concept|idea|pattern|architecture)\b/.test(lower)) {
+        return 'topic';
+    }
+    // Lesson indicators
+    if (/\b(lesson|insight|learning|realization)\b/.test(lower)) {
+        return 'lesson';
+    }
+    // Preference indicators
+    if (/\b(preference|setting|config|default)\b/.test(lower)) {
+        return 'preference';
+    }
+    // Agent indicators
+    if (/\b(athena|athenamem|openclaw|codex|claude|gpt)\b/.test(lower)) {
+        return 'agent';
+    }
+    // Person indicators (names typically don't have spaces, might have @)
+    if (/^[A-Z][a-z]+$/.test(name) || name.includes('@')) {
+        return 'person';
+    }
+    return defaultType;
+}
+/**
+ * athenamem_kg_invalidate — mark memory or entity as no longer current.
+ *
+ * Invalidation = "this is no longer true" (separate from contradictions).
+ * Reasons: user_deleted, expired, superseded, error.
+ */
+export async function toolKgInvalidate(id, type = 'memory', reason = 'superseded', ended) {
+    const c = getContext();
+    const endTime = ended ?? Date.now();
+    if (type === 'memory') {
+        c.kg.invalidateMemory(id, reason, endTime);
+    }
+    else {
+        c.kg.invalidateEntity(id, endTime);
+    }
+    return { invalidated: true, type, id, valid_to: endTime };
 }
 /**
  * athenamem_kg_timeline — chronological entity story.
@@ -346,13 +453,18 @@ export async function toolResolveConflict(memoryId, resolution) {
     return { resolved: true, action: resolution };
 }
 /**
- * athenamem_diary_write — write AAAK diary entry.
+ * athenamem_diary_write — write AAAK diary entry (unified ingestion).
  */
 export async function toolDiaryWrite(agentName, entryType, content) {
-    const c = getContext();
-    c.palace.getOrCreateRoom(agentName, 'diary');
-    const { memory } = c.palace.addDrawer(agentName, 'diary', 'discoveries', `diary-${Date.now()}.md`, `[${entryType.toUpperCase()}] ${content}`);
-    return { memory_id: memory.id };
+    const result = await ingestMemory(agentName, 'diary', 'lesson', `[${entryType.toUpperCase()}] ${content}`, {
+        source: 'diary',
+        filePath: `diary/${agentName}-${Date.now()}.md`,
+        provenance: { triggerTool: 'diary_write' },
+    });
+    return {
+        memory_id: result.memoryId,
+        salience: result.salienceScore,
+    };
 }
 /**
  * athenamem_diary_read — read recent diary entries.
@@ -412,5 +524,67 @@ export async function toolCreateWing(wingName, description) {
 export async function toolCreateRoom(wingName, roomName, description) {
     const { palace } = getContext();
     return palace.createRoom(wingName, roomName, description ?? '');
+}
+// ─── Debug Tools (Phase 4) ─────────────────────────────────────────────────────
+/**
+ * athenamem_trace_memory — full audit trail of a memory.
+ */
+export async function toolTraceMemory(memoryId) {
+    const c = getContext();
+    const trace = await traceMemory(memoryId, c.kg, c.palace, c.wal);
+    if (!trace) {
+        return { found: false, error: `Memory ${memoryId} not found` };
+    }
+    return {
+        found: true,
+        trace: {
+            memory: trace.memory,
+            entry: trace.entry,
+            facts: trace.facts.length,
+            contradictions: trace.contradictions.length,
+            lifecycle: trace.lifecycle,
+        },
+    };
+}
+/**
+ * athenamem_explain_recall — why did these memories rank here?
+ *
+ * ⚠️ CURRENT LIMITATION: This returns approximate explanations based on
+ * stored memory metadata. Full source breakdown requires orchestrator support.
+ */
+export async function toolExplainRecall(query, resultMemoryIds) {
+    const c = getContext();
+    // ⚠️ APPROXIMATE: Using stored metadata since orchestrator doesn't pass full search context
+    const memories = [];
+    for (const id of resultMemoryIds) {
+        const memory = c.kg.getMemoryById(id);
+        if (memory) {
+            memories.push({
+                memory,
+                score: memory.importance,
+                sourceScores: { athenamem: memory.importance }, // Approximate
+                matched_keywords: [], // Would need search context
+            });
+        }
+    }
+    const explanation = explainRecall(query, memories);
+    return {
+        query,
+        approximate: true,
+        note: 'Explanations are approximate. Full source breakdown requires orchestrator to pass search metadata.',
+        explanation: {
+            memory_count: memories.length,
+            filters_applied: explanation.filters_applied,
+            top_memories: explanation.top_results.slice(0, 5).map(r => ({
+                rank: r.rank,
+                memory_id: r.memory_id,
+                score: r.final_score,
+                salience: r.salience,
+                valid: r.valid,
+                contradicted: r.contradicted,
+                why_ranked: r.why_ranked,
+            })),
+        },
+    };
 }
 //# sourceMappingURL=server.js.map
