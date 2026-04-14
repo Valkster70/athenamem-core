@@ -6,7 +6,7 @@ import { Type } from "@sinclair/typebox";
 import { homedir } from "os";
 import * as path from "path";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import { init, getContext, setSession, toolStatus, toolListWings, toolListRooms, toolSearch, toolGetAaakSpec, toolAddDrawer, toolDeleteDrawer, toolKgQuery, toolKgAdd, toolKgInvalidate, toolKgTimeline, toolCheckFacts, toolResolveConflict, toolDiaryWrite, toolDiaryRead, toolTraverse, toolFindTunnels, toolRecall, toolCreateWing, toolCreateRoom, } from "./plugin/server.js";
+import { init, getContext, setSession, toolStatus, toolListWings, toolListRooms, toolSearch, toolGetAaakSpec, toolAddDrawer, toolDeleteDrawer, toolKgQuery, toolKgAdd, toolKgInvalidate, toolKgTimeline, toolCheckFacts, toolResolveConflict, toolDiaryWrite, toolDiaryRead, toolTraverse, toolFindTunnels, toolRecall, toolCreateWing, toolCreateRoom, toolTraceMemory, toolExplainRecall, } from "./plugin/server.js";
 // ─── Tool parameter schemas ─────────────────────────────────────────────────────
 const EmptySchema = Type.Object({});
 const ListRoomsSchema = Type.Object({
@@ -84,6 +84,13 @@ const TraverseSchema = Type.Object({
 const RecallSchema = Type.Object({
     query: Type.String(),
     limit: Type.Optional(Type.Number()),
+});
+const TraceMemorySchema = Type.Object({
+    memoryId: Type.String(),
+});
+const ExplainRecallSchema = Type.Object({
+    query: Type.String(),
+    resultMemoryIds: Type.Array(Type.String()),
 });
 // ─── Plugin definition ─────────────────────────────────────────────────────────
 const athenamem = definePluginEntry({
@@ -318,6 +325,24 @@ const athenamem = definePluginEntry({
             parameters: RecallSchema,
             async execute(_, params) {
                 const result = await toolRecall(String(params.query), params.limit != null ? Number(params.limit) : 30);
+                return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+            },
+        });
+        api.registerTool({
+            name: "athenamem_trace_memory",
+            description: "Return the audit trail for a memory: entry linkage, facts, contradictions, and lifecycle.",
+            parameters: TraceMemorySchema,
+            async execute(_, params) {
+                const result = await toolTraceMemory(String(params.memoryId));
+                return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+            },
+        });
+        api.registerTool({
+            name: "athenamem_explain_recall",
+            description: "Explain why recalled memories ranked highly, including salience and validity flags.",
+            parameters: ExplainRecallSchema,
+            async execute(_, params) {
+                const result = await toolExplainRecall(String(params.query), Array.isArray(params.resultMemoryIds) ? params.resultMemoryIds.map(String) : []);
                 return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
             },
         });

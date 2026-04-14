@@ -31,6 +31,8 @@ import {
   toolRecall,
   toolCreateWing,
   toolCreateRoom,
+  toolTraceMemory,
+  toolExplainRecall,
 } from "./plugin/server.js";
 
 // ─── Tool parameter schemas ─────────────────────────────────────────────────────
@@ -125,6 +127,15 @@ const TraverseSchema = Type.Object({
 const RecallSchema = Type.Object({
   query: Type.String(),
   limit: Type.Optional(Type.Number()),
+});
+
+const TraceMemorySchema = Type.Object({
+  memoryId: Type.String(),
+});
+
+const ExplainRecallSchema = Type.Object({
+  query: Type.String(),
+  resultMemoryIds: Type.Array(Type.String()),
 });
 
 // ─── Plugin definition ─────────────────────────────────────────────────────────
@@ -432,6 +443,29 @@ const athenamem = definePluginEntry({
         const result = await toolRecall(
           String(params.query),
           params.limit != null ? Number(params.limit) : 30,
+        );
+        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+      },
+    });
+
+    api.registerTool({
+      name: "athenamem_trace_memory",
+      description: "Return the audit trail for a memory: entry linkage, facts, contradictions, and lifecycle.",
+      parameters: TraceMemorySchema,
+      async execute(_, params) {
+        const result = await toolTraceMemory(String(params.memoryId));
+        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+      },
+    });
+
+    api.registerTool({
+      name: "athenamem_explain_recall",
+      description: "Explain why recalled memories ranked highly, including salience and validity flags.",
+      parameters: ExplainRecallSchema,
+      async execute(_, params) {
+        const result = await toolExplainRecall(
+          String(params.query),
+          Array.isArray(params.resultMemoryIds) ? params.resultMemoryIds.map(String) : [],
         );
         return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       },

@@ -51,14 +51,14 @@ export type SearchSource = 'qmd' | 'clawvault' | 'hindsight' | 'mnemo' | 'kg' | 
 
 export interface SearchOptions {
   query: string;
-  module?: string;            // filter to module (legacy: use wing)
-  section?: string;            // filter to section (legacy: use room)
-  wing?: string;              // filter to wing (preferred)
-  room?: string;              // filter to room (preferred)
+  module?: string; // internal canonical filter
+  section?: string; // internal canonical filter
+  wing?: string; // external alias for module
+  room?: string; // external alias for section
   sources?: SearchSource[]; // which systems to query (default: all)
-  limit?: number;           // max results (default: 20)
-  fuseK?: number;           // RRF k parameter (default: 60)
-  minScore?: number;        // minimum fused score (default: 0.1)
+  limit?: number; // max results (default: 20)
+  fuseK?: number; // RRF k parameter (default: 60)
+  minScore?: number; // minimum fused score (default: 0.1)
   includeArchived?: boolean; // include cold/archival storage
 }
 
@@ -146,11 +146,16 @@ export class SearchOrchestrator {
       query,
       module,
       section,
+      wing,
+      room,
       sources,
       limit = 20,
       fuseK = 60,
       minScore = 0.01,
     } = options;
+
+    const normalizedModule = wing ?? module;
+    const normalizedSection = room ?? section;
 
     const allSources: SearchSource[] = sources ?? ['qmd', 'clawvault', 'hindsight', 'mnemo', 'kg'];
     const details: SearchResponse['details'] = {};
@@ -160,7 +165,7 @@ export class SearchOrchestrator {
     const sourceMap: SearchSource[] = [];
 
     for (const source of allSources) {
-      queries.push(this.querySystem(source, query, module, section, limit));
+      queries.push(this.querySystem(source, query, normalizedModule, normalizedSection, limit));
       sourceMap.push(source);
     }
 

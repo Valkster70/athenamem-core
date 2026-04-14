@@ -57,14 +57,16 @@ export class SearchOrchestrator {
      */
     async search(options) {
         const start = Date.now();
-        const { query, module, section, sources, limit = 20, fuseK = 60, minScore = 0.01, } = options;
+        const { query, module, section, wing, room, sources, limit = 20, fuseK = 60, minScore = 0.01, } = options;
+        const normalizedModule = wing ?? module;
+        const normalizedSection = room ?? section;
         const allSources = sources ?? ['qmd', 'clawvault', 'hindsight', 'mnemo', 'kg'];
         const details = {};
         // Fire all system queries in parallel
         const queries = [];
         const sourceMap = [];
         for (const source of allSources) {
-            queries.push(this.querySystem(source, query, module, section, limit));
+            queries.push(this.querySystem(source, query, normalizedModule, normalizedSection, limit));
             sourceMap.push(source);
         }
         const results = await Promise.allSettled(queries);

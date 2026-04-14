@@ -24,6 +24,7 @@ import { ingestMemoryEvent } from '../core/ingestion.js';
 import { traceMemory, explainRecall } from '../core/debug.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { homedir } from 'os';
 let ctx = null;
 export function getContext() {
     if (!ctx || !ctx.initialized) {
@@ -35,7 +36,7 @@ export function getContext() {
 export async function init(config = {}) {
     if (ctx?.initialized)
         return;
-    const home = process.env.HOME ?? '/home/chris';
+    const home = process.env.HOME ?? homedir();
     const workDir = path.join(home, '.openclaw', 'workspace', 'athenamem');
     const cfg = {
         data_dir: config.data_dir ?? path.join(workDir, 'data'),

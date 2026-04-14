@@ -26,6 +26,7 @@ import { ingestMemoryEvent } from '../core/ingestion.js';
 import { traceMemory, explainRecall } from '../core/debug.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { homedir } from 'os';
 import { v4 as uuidv4 } from 'uuid';
 
 // ─── Plugin Context ────────────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ export function getContext(): PluginContext {
 export async function init(config: Partial<AthenaMemConfig> = {}): Promise<void> {
   if (ctx?.initialized) return;
 
-  const home = process.env.HOME ?? '/home/chris';
+  const home = process.env.HOME ?? homedir();
   const workDir = path.join(home, '.openclaw', 'workspace', 'athenamem');
   
   const cfg: AthenaMemConfig = {

@@ -15,10 +15,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "paths": {
-      "openclaw/plugin-sdk/*": ["/home/chris/.npm-global/lib/node_modules/openclaw/dist/plugin-sdk/*"]
-    }
+    "noUnusedParameters": false
   },
   "include": ["src/**/*", "src/types/**/*"],
   "exclude": ["node_modules", "dist", "tests"]
