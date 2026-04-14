@@ -87,6 +87,8 @@ export declare class SearchOrchestrator {
     private queryHindsight;
     private queryMnemo;
     private queryKG;
+    private collectFiles;
+    private safeReadText;
     private toRankedMap;
     private findResultById;
     /**
