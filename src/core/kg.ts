@@ -71,8 +71,16 @@ export interface Memory {
   section: string;
   module: string;
   importance: number;
+  
+  // Contradiction tracking (actual conflicts)
   contradiction_flag: boolean;
   contradiction_with: string | null;
+  
+  // Memory lifecycle status (separate from contradictions)
+  status: 'active' | 'invalidated' | 'compacted' | 'archived';
+  valid_to: number | null;  // When invalidated/ended (null = still active)
+  
+  // Timestamps
   created_at: number;
   last_accessed: number | null;
   access_count: number;
@@ -180,8 +188,15 @@ export class KnowledgeGraph {
         section TEXT NOT NULL,
         module TEXT NOT NULL,
         importance REAL NOT NULL DEFAULT 0.5,
+        
+        -- Contradiction tracking (actual conflicts)
         contradiction_flag INTEGER NOT NULL DEFAULT 0,
         contradiction_with TEXT,
+        
+        -- Memory lifecycle status (separate from contradictions)
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'invalidated', 'compacted', 'archived')),
+        valid_to INTEGER,
+        
         created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
         last_accessed INTEGER,
         access_count INTEGER NOT NULL DEFAULT 0
@@ -247,9 +262,30 @@ export class KnowledgeGraph {
       CREATE INDEX IF NOT EXISTS idx_memories_module_section ON memories(module, section);
       CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);
       CREATE INDEX IF NOT EXISTS idx_memories_contradiction ON memories(contradiction_flag) WHERE contradiction_flag = 1;
+      CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';
       CREATE INDEX IF NOT EXISTS idx_entries_module ON entries(module);
       CREATE INDEX IF NOT EXISTS idx_drawers_wing ON drawers(wing);
     `);
+    
+    // Run migrations for existing databases
+    this.migrate();
+  }
+  
+  /**
+   * Database migrations for schema updates.
+   */
+  private migrate(): void {
+    // Migration: Add status and valid_to columns if they don't exist
+    try {
+      this.db.exec(`
+        ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active' 
+        CHECK (status IN ('active', 'invalidated', 'compacted', 'archived'));
+      `);
+      this.db.exec(`ALTER TABLE memories ADD COLUMN valid_to INTEGER;`);
+      this.db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';`);
+    } catch (e) {
+      // Columns likely already exist, ignore error
+    }
   }
 
   // ─── Entity Operations ──────────────────────────────────────────────────────
@@ -396,14 +432,16 @@ export class KnowledgeGraph {
     const now = Date.now();
 
     this.db.prepare(`
-      INSERT INTO memories (id, entry_id, content, summary, memory_type, section, module, importance, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO memories (id, entry_id, content, summary, memory_type, section, module, importance, status, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
     `).run(id, entryId, content, summary, memoryType, section, module, importance, now);
 
     return {
       id, entry_id: entryId, content, summary, memory_type: memoryType,
       section, module, importance, contradiction_flag: false, contradiction_with: null,
+      status: 'active', valid_to: null,
       created_at: now, last_accessed: null, access_count: 0
+    };
     };
   }
 
@@ -728,5 +766,28 @@ export class KnowledgeGraph {
           last_accessed = ? 
       WHERE id = ?
     `).run(now, memoryId);
+  }
+
+  /**
+   * Invalidate a memory — mark it as no longer current.
+   * Separate from contradiction (which marks an actual conflict).
+   */
+  invalidateMemory(memoryId: string, reason: 'user_deleted' | 'expired' | 'superseded' | 'error', ended: number = Date.now()): void {
+    this.db.prepare(`
+      UPDATE memories 
+      SET status = 'invalidated', 
+          valid_to = ?,
+          summary = COALESCE(summary, '') || ' [invalidated: ' || ? || ']'
+      WHERE id = ?
+    `).run(ended, reason, memoryId);
+  }
+
+  /**
+   * Get memories by status (for compaction, cleanup).
+   */
+  getMemoriesByStatus(status: Memory['status'], limit: number = 1000): Memory[] {
+    return this.db.prepare(`
+      SELECT * FROM memories WHERE status = ? ORDER BY created_at DESC LIMIT ?
+    `).all(status, limit) as Memory[];
   }
 }

@@ -430,28 +430,116 @@ export async function toolKgQuery(
 }
 
 /**
- * athenamem_kg_add — add facts.
+ * athenamem_kg_add — add facts with proper entity typing.
+ * 
+ * Defaults to 'person' for both entities if type not specified.
+ * Infers types from module/category context when possible.
  */
 export async function toolKgAdd(
   subject: string,
   predicate: Predicate,
   object: string,
   confidence: number = 1.0,
+  subjectType?: EntityType,
+  objectType?: EntityType,
+  sourceMemoryId?: string,
   metadata: Record<string, unknown> = {}
-): Promise<{ entity_id: string; relation_id: string }> {
+): Promise<{
+  subject_entity_id: string;
+  object_entity_id: string;
+  relation_id: string;
+  inferred_types: { subject: EntityType; object: EntityType };
+}> {
   const c = getContext();
-  const subjectEntity = c.kg.addEntity(subject, 'person');
-  const objectEntity = c.kg.addEntity(object, 'person');
-  const relation = c.kg.addRelation(subjectEntity.id, predicate, objectEntity.id, confidence);
-  return { entity_id: subjectEntity.id, relation_id: relation.id };
+  
+  // Infer entity types if not provided
+  const inferredSubjectType = subjectType ?? inferEntityType(subject, 'person');
+  const inferredObjectType = objectType ?? inferEntityType(object, 'person');
+  
+  const subjectEntity = c.kg.addEntity(subject, inferredSubjectType, metadata);
+  const objectEntity = c.kg.addEntity(object, inferredObjectType, metadata);
+  const relation = c.kg.addRelation(
+    subjectEntity.id,
+    predicate,
+    objectEntity.id,
+    confidence,
+    sourceMemoryId ?? null
+  );
+  
+  return {
+    subject_entity_id: subjectEntity.id,
+    object_entity_id: objectEntity.id,
+    relation_id: relation.id,
+    inferred_types: { subject: inferredSubjectType, object: inferredObjectType },
+  };
 }
 
 /**
- * athenamem_kg_invalidate — mark entity/relation as ended.
+ * Infer entity type from name patterns and context.
  */
-export async function toolKgInvalidate(entityId: string, ended?: number): Promise<{ invalidated: boolean }> {
-  getContext().kg.invalidateEntity(entityId, ended);
-  return { invalidated: true };
+function inferEntityType(name: string, defaultType: EntityType = 'person'): EntityType {
+  const lower = name.toLowerCase();
+  
+  // Project indicators
+  if (/\b(app|project|system|service|api|bot|agent|tool)\b/.test(lower)) {
+    return 'project';
+  }
+  
+  // Decision indicators
+  if (/\b(decision|choice|option|plan|strategy)\b/.test(lower)) {
+    return 'decision';
+  }
+  
+  // Topic indicators
+  if (/\b(topic|concept|idea|pattern|architecture)\b/.test(lower)) {
+    return 'topic';
+  }
+  
+  // Lesson indicators
+  if (/\b(lesson|insight|learning|realization)\b/.test(lower)) {
+    return 'lesson';
+  }
+  
+  // Preference indicators
+  if (/\b(preference|setting|config|default)\b/.test(lower)) {
+    return 'preference';
+  }
+  
+  // Agent indicators
+  if (/\b(athena|athenamem|openclaw|codex|claude|gpt)\b/.test(lower)) {
+    return 'agent';
+  }
+  
+  // Person indicators (names typically don't have spaces, might have @)
+  if (/^[A-Z][a-z]+$/.test(name) || name.includes('@')) {
+    return 'person';
+  }
+  
+  return defaultType;
+}
+
+/**
+ * athenamem_kg_invalidate — mark memory or entity as no longer current.
+ * 
+ * Invalidation = "this is no longer true" (separate from contradictions).
+ * Reasons: user_deleted, expired, superseded, error.
+ */
+export async function toolKgInvalidate(
+  id: string,
+  type: 'memory' | 'entity' = 'memory',
+  reason: 'user_deleted' | 'expired' | 'superseded' | 'error' = 'superseded',
+  ended?: number
+): Promise<{ invalidated: boolean; type: string; id: string; valid_to: number }> {
+  const c = getContext();
+  const endTime = ended ?? Date.now();
+  
+  if (type === 'memory') {
+    c.kg.invalidateMemory(id, reason, endTime);
+  } else {
+    c.kg.invalidateEntity(id, endTime);
+  }
+  
+  return { invalidated: true, type, id, valid_to: endTime };
 }
 
 /**
