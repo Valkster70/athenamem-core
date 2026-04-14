@@ -14,6 +14,9 @@
  * Results are fused, deduplicated, and optionally reranked by LLM.
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+import { homedir } from 'os';
 import { KnowledgeGraph } from '../core/kg.js';
 import { Palace } from '../core/palace.js';
 
@@ -127,10 +130,11 @@ export class SearchOrchestrator {
       mnemoUrl?: string;
     } = {}
   ) {
+    const home = process.env.HOME ?? homedir();
     this.kg = kg;
     this.palace = palace;
-    this.qmdPath = opts.qmdPath ?? `${process.env.HOME}/.cache/qmd`;
-    this.clawvaultPath = opts.clawvaultPath ?? `${process.env.HOME}/.openclaw/workspace/memory`;
+    this.qmdPath = opts.qmdPath ?? path.join(home, '.cache', 'qmd');
+    this.clawvaultPath = opts.clawvaultPath ?? path.join(home, '.openclaw', 'workspace', 'memory');
     this.hindsightUrl = opts.hindsightUrl ?? 'http://127.0.0.1:8888';
     this.mnemoUrl = opts.mnemoUrl ?? 'http://127.0.0.1:50001';
   }
@@ -287,49 +291,46 @@ export class SearchOrchestrator {
     section?: string,
     limit: number = 20
   ): Promise<SearchResult[]> {
-    try {
-      const { execSync } = require('child_process');
-      const grepQuery = query.replace(/"/g, '\\"').replace(/'/g, "'\"'\"'");
-
-      let basePath = this.clawvaultPath;
-      if (module) {
-        basePath = `${basePath}/${module}`;
-        if (section) {
-          basePath = `${basePath}/${section}`;
-        }
+    let basePath = this.clawvaultPath;
+    if (module) {
+      basePath = path.join(basePath, module);
+      if (section) {
+        basePath = path.join(basePath, section);
       }
+    }
 
-      const searchCmd = `grep -ri "${grepQuery}" "${basePath}" 2>/dev/null | head -${limit}`;
-      const output = execSync(searchCmd, { encoding: 'utf-8', timeout: 10000 });
-      const results: SearchResult[] = [];
-      const lines: string[] = output.split('\n').filter((l: string) => l.trim());
-
-      for (const line of lines) {
-        const colonIdx = line.indexOf(':');
-        if (colonIdx === -1) continue;
-        const file = line.substring(0, colonIdx);
-        const content = line.substring(colonIdx + 1).trim();
-
-        // Extract module/section from path
-        const parts = file.replace(this.clawvaultPath, '').split('/').filter(Boolean);
-        if (module && parts[0] !== module) continue;
-        if (section && parts[1] !== section) continue;
-
-        results.push({
-          id: `clawvault:${file}`,
-          content,
-          source: 'clawvault',
-          source_name: `ClawVault/${parts.slice(0, 2).join('/')}`,
-          score: 0.5,
-          module: parts[0],
-          section: parts[1],
-        });
-      }
-
-      return results;
-    } catch {
+    if (!fs.existsSync(basePath)) {
       return [];
     }
+
+    const normalizedQuery = query.toLowerCase();
+    const results: SearchResult[] = [];
+    const files = this.collectFiles(basePath);
+
+    for (const file of files) {
+      if (results.length >= limit) break;
+
+      const content = this.safeReadText(file);
+      if (content == null || !content.toLowerCase().includes(normalizedQuery)) continue;
+
+      const relative = path.relative(this.clawvaultPath, file);
+      const parts = relative.split(path.sep).filter(Boolean);
+      if (module && parts[0] !== module) continue;
+      if (section && parts[1] !== section) continue;
+
+      results.push({
+        id: `clawvault:${file}`,
+        content: content.length > 300 ? `${content.slice(0, 300)}...` : content,
+        source: 'clawvault',
+        source_name: `ClawVault/${parts.slice(0, 2).join('/')}`,
+        score: 0.5,
+        module: parts[0],
+        section: parts[1],
+        url: file,
+      });
+    }
+
+    return results;
   }
 
   private async queryHindsight(query: string, limit: number): Promise<SearchResult[]> {
@@ -409,6 +410,38 @@ export class SearchOrchestrator {
   }
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
+
+  private collectFiles(dir: string): string[] {
+    const files: string[] = [];
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files.push(...this.collectFiles(fullPath));
+        continue;
+      }
+      if (!entry.isFile()) continue;
+
+      const ext = path.extname(entry.name).toLowerCase();
+      if (!['.md', '.txt', '.json', '.yaml', '.yml'].includes(ext)) continue;
+
+      const stat = fs.statSync(fullPath);
+      if (stat.size > 1024 * 1024) continue;
+
+      files.push(fullPath);
+    }
+
+    return files;
+  }
+
+  private safeReadText(file: string): string | null {
+    try {
+      return fs.readFileSync(file, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
 
   private toRankedMap(results: SearchResult[]): Map<string, { source: SearchSource; rank: number; score: number; result: SearchResult }> {
     const map = new Map<string, { source: SearchSource; rank: number; score: number; result: SearchResult }>();
