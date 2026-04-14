@@ -1,5 +1,7 @@
 # AthenaMem
 
+![AthenaMem](athenamem-main.png)
+
 > **"The memory that learns."**
 
 A biomimetic memory stack for AI agents — built on the principle that memory isn't storage, it's a living system that organizes, prioritizes, connects, and improves itself over time.
