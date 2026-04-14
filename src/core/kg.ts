@@ -620,6 +620,15 @@ export class KnowledgeGraph {
   }
 
   /**
+   * Get memories by entry ID (for drawer invalidation).
+   */
+  getMemoriesByEntryId(entryId: string): Memory[] {
+    return this.db.prepare(`
+      SELECT * FROM memories WHERE entry_id = ? ORDER BY created_at DESC
+    `).all(entryId) as Memory[];
+  }
+
+  /**
    * Legacy method: Get drawer by path.
    */
   getDrawer(filePath: string): Drawer | null {

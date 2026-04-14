@@ -303,7 +303,7 @@ export async function toolStatus(): Promise<string> {
     '## Knowledge Graph',
     `  Entities: ${stats.entity_count} (${stats.active_entities} active)`,
     `  Relations: ${stats.relation_count}`,
-    `  Memories: ${stats.memory_count} | Drawers: ${stats.drawer_count}`,
+    `  Memories: ${stats.memory_count} | Entries: ${stats.entry_count}`,
     `  Contradictions: ${stats.contradictions}`,
     '',
     '## Palace',
@@ -426,13 +426,22 @@ function mapHallToCategory(hall: HallType): CategoryType {
 }
 
 /**
- * athenamem_delete_drawer — remove by ID.
+ * athenamem_delete_drawer — invalidate memories by entry ID (soft delete).
+ * 
+ * Memories are marked as invalidated rather than deleted to preserve audit trail.
  */
-export async function toolDeleteDrawer(drawerId: string): Promise<{ deleted: boolean }> {
+export async function toolDeleteDrawer(entryId: string): Promise<{ deleted: boolean; memories_invalidated: number }> {
   const c = getContext();
-  // Mark all memories from this drawer as invalidated
-  // (we don't actually delete to preserve KG integrity)
-  return { deleted: true };
+  const memories = c.kg.getMemoriesByEntryId(entryId);
+
+  for (const memory of memories) {
+    c.kg.invalidateMemory(memory.id, 'user_deleted');
+  }
+
+  return {
+    deleted: true,
+    memories_invalidated: memories.length,
+  };
 }
 
 /**
