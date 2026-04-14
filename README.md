@@ -1,6 +1,6 @@
 # AthenaMem
 
-![AthenaMem](athenamem-main.png)
+![AthenaMem](athenamem-splash.png)
 
 > **"The memory that learns."**
 
