@@ -269,16 +269,11 @@ export declare function toolTraceMemory(memoryId: string): Promise<{
     };
     error?: string;
 }>;
-/**
- * athenamem_explain_recall — why did these memories rank here?
- *
- * ⚠️ CURRENT LIMITATION: This returns approximate explanations based on
- * stored memory metadata. Full source breakdown requires orchestrator support.
- */
 export declare function toolExplainRecall(query: string, resultMemoryIds: string[]): Promise<{
     query: string;
     approximate: boolean;
     note: string;
+    unsupported_result_ids: string[];
     explanation: {
         memory_count: number;
         filters_applied: string[];

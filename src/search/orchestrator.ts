@@ -290,8 +290,16 @@ export class SearchOrchestrator {
     try {
       const { execSync } = require('child_process');
       const grepQuery = query.replace(/"/g, '\\"').replace(/'/g, "'\"'\"'");
-      let searchCmd = `grep -ri "${grepQuery}" "${this.clawvaultPath}" 2>/dev/null | head -${limit}`;
 
+      let basePath = this.clawvaultPath;
+      if (module) {
+        basePath = `${basePath}/${module}`;
+        if (section) {
+          basePath = `${basePath}/${section}`;
+        }
+      }
+
+      const searchCmd = `grep -ri "${grepQuery}" "${basePath}" 2>/dev/null | head -${limit}`;
       const output = execSync(searchCmd, { encoding: 'utf-8', timeout: 10000 });
       const results: SearchResult[] = [];
       const lines: string[] = output.split('\n').filter((l: string) => l.trim());
@@ -304,6 +312,9 @@ export class SearchOrchestrator {
 
         // Extract module/section from path
         const parts = file.replace(this.clawvaultPath, '').split('/').filter(Boolean);
+        if (module && parts[0] !== module) continue;
+        if (section && parts[1] !== section) continue;
+
         results.push({
           id: `clawvault:${file}`,
           content,

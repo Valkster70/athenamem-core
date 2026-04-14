@@ -553,26 +553,39 @@ export async function toolTraceMemory(memoryId) {
  * ⚠️ CURRENT LIMITATION: This returns approximate explanations based on
  * stored memory metadata. Full source breakdown requires orchestrator support.
  */
+function extractMemoryId(resultId) {
+    if (resultId.startsWith('kg:'))
+        return resultId.slice(3);
+    return null;
+}
 export async function toolExplainRecall(query, resultMemoryIds) {
     const c = getContext();
+    const skipped = [];
     // ⚠️ APPROXIMATE: Using stored metadata since orchestrator doesn't pass full search context
     const memories = [];
-    for (const id of resultMemoryIds) {
-        const memory = c.kg.getMemoryById(id);
-        if (memory) {
-            memories.push({
-                memory,
-                score: memory.importance,
-                sourceScores: { athenamem: memory.importance }, // Approximate
-                matched_keywords: [], // Would need search context
-            });
+    for (const resultId of resultMemoryIds) {
+        const extracted = extractMemoryId(resultId);
+        const memoryId = extracted ?? resultId;
+        if (extracted === null && resultId.includes(':')) {
+            skipped.push(resultId);
+            continue;
         }
+        const memory = c.kg.getMemoryById(memoryId);
+        if (!memory)
+            continue;
+        memories.push({
+            memory,
+            score: memory.importance,
+            sourceScores: { athenamem: memory.importance },
+            matched_keywords: [],
+        });
     }
     const explanation = explainRecall(query, memories);
     return {
         query,
         approximate: true,
-        note: 'Explanations are approximate. Full source breakdown requires orchestrator to pass search metadata.',
+        note: 'Explanations are approximate. Only KG-backed recall results can currently be explained. Full source breakdown requires orchestrator to pass search metadata.',
+        unsupported_result_ids: skipped,
         explanation: {
             memory_count: memories.length,
             filters_applied: explanation.filters_applied,
