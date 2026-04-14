@@ -485,53 +485,79 @@ export class KnowledgeGraph {
    * Falls back to LIKE query if FTS returns no results.
    */
   searchMemories(query: string, module?: string, section?: string, limit: number = 20): Memory[] {
-    // Try FTS5 first
-    let sql = `
-      SELECT m.* FROM memories m
-      JOIN memories_fts fts ON m.rowid = fts.rowid
-      WHERE memories_fts MATCH ?
-    `;
-    const params: (string | number)[] = [query];
+    const q = (query ?? '').trim();
+    if (!q) return [];
 
-    if (module) {
-      sql += ' AND m.module = ?';
-      params.push(module);
-    }
-    if (section) {
-      sql += ' AND m.section = ?';
-      params.push(section);
-    }
-
-    sql += ' ORDER BY rank LIMIT ?';
-    params.push(limit);
-
+    // Try FTS5 first with named params
     try {
-      const rows = this.db.prepare(sql).all(...params) as Memory[];
+      let ftsSql = `
+        SELECT m.* FROM memories m
+        JOIN memories_fts ON m.rowid = memories_fts.rowid
+        WHERE memories_fts MATCH @q
+      `;
+      const ftsParams: Record<string, string | number> = {
+        q,
+        limit,
+      };
+
+      if (module) {
+        ftsSql += ' AND m.module = @module';
+        ftsParams['module'] = module;
+      }
+      if (section) {
+        ftsSql += ' AND m.section = @section';
+        ftsParams['section'] = section;
+      }
+
+      ftsSql += ' ORDER BY m.created_at DESC LIMIT @limit';
+
+      const rows = this.db.prepare(ftsSql).all(ftsParams) as Memory[];
       if (rows.length > 0) {
         return rows.map(row => ({ ...row, contradiction_flag: (row as any).contradiction_flag === 1 }));
       }
-    } catch (e) {
-      // FTS might fail on some queries, fall through to LIKE
+    } catch {
+      // FTS may fail for some queries, fall through to LIKE
     }
 
-    // Fallback: LIKE query for broader matching
-    let fallbackSql = `SELECT * FROM memories WHERE content LIKE ?`;
-    const fallbackParams: (string | number)[] = [`%${query}%`];
+    // Fallback: LIKE query (full query + keyword terms)
+    try {
+      const tokens = q
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(t => t.length >= 4)
+        .slice(0, 8);
 
-    if (module) {
-      fallbackSql += ' AND module = ?';
-      fallbackParams.push(module);
+      const termClauses: string[] = ['content LIKE @like'];
+      const fallbackParams: Record<string, string | number> = {
+        like: `%${q}%`,
+        limit,
+      };
+
+      tokens.forEach((t, i) => {
+        const key = `term${i}`;
+        termClauses.push(`content LIKE @${key}`);
+        fallbackParams[key] = `%${t}%`;
+      });
+
+      let fallbackSql = `SELECT * FROM memories WHERE (${termClauses.join(' OR ')})`;
+
+      if (module) {
+        fallbackSql += ' AND module = @module';
+        fallbackParams['module'] = module;
+      }
+      if (section) {
+        fallbackSql += ' AND section = @section';
+        fallbackParams['section'] = section;
+      }
+
+      fallbackSql += ' ORDER BY created_at DESC LIMIT @limit';
+
+      const rows = this.db.prepare(fallbackSql).all(fallbackParams) as Memory[];
+      return rows.map(row => ({ ...row, contradiction_flag: (row as any).contradiction_flag === 1 }));
+    } catch {
+      return [];
     }
-    if (section) {
-      fallbackSql += ' AND section = ?';
-      fallbackParams.push(section);
-    }
-
-    fallbackSql += ' ORDER BY created_at DESC LIMIT ?';
-    fallbackParams.push(limit);
-
-    const rows = this.db.prepare(fallbackSql).all(...fallbackParams) as Memory[];
-    return rows.map(row => ({ ...row, contradiction_flag: (row as any).contradiction_flag === 1 }));
   }
 
   /**
