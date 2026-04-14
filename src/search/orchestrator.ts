@@ -15,7 +15,7 @@
  */
 
 import { KnowledgeGraph } from '../core/kg.js';
-import { Structure } from '../core/structure.js';
+import { Palace } from '../core/palace.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
