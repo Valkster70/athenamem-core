@@ -171,18 +171,18 @@ export class KnowledgeGraph {
      * Database migrations for schema updates.
      */
     migrate() {
-        // Migration: Add status and valid_to columns if they don't exist
-        try {
+        const memoryColumns = this.db.prepare(`PRAGMA table_info(memories)`).all();
+        const columnNames = new Set(memoryColumns.map((col) => col.name));
+        if (!columnNames.has('status')) {
             this.db.exec(`
-        ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active' 
+        ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'invalidated', 'compacted', 'archived'));
       `);
+        }
+        if (!columnNames.has('valid_to')) {
             this.db.exec(`ALTER TABLE memories ADD COLUMN valid_to INTEGER;`);
-            this.db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';`);
         }
-        catch (e) {
-            // Columns likely already exist, ignore error
-        }
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';`);
     }
     // ─── Entity Operations ──────────────────────────────────────────────────────
     /**
