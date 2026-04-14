@@ -382,7 +382,7 @@ export async function toolGetAaakSpec(): Promise<string> {
 }
 
 /**
- * athenamem_add_drawer — store verbatim content.
+ * athenamem_add_drawer — store verbatim content (unified ingestion).
  */
 export async function toolAddDrawer(
   wingName: string,
@@ -390,21 +390,39 @@ export async function toolAddDrawer(
   hall: HallType,
   content: string,
   filePath?: string
-): Promise<{ drawer_id: string; memory_id: string }> {
-  const c = getContext();
-  const fp = filePath ?? `${hall}/${wingName}-${roomName}-${Date.now()}.md`;
-
-  const { drawer, memory } = c.palace.addDrawer(wingName, roomName, hall, fp, content);
-
-  // Check for contradictions
-  if (c.config.contradiction_check) {
-    const result = checkAndFlagContradictions(c.kg, memory, content);
-    if (result.has_contradiction) {
-      console.warn(`[AthenaMem] ${result.contradictions.length} contradiction(s) detected for ${memory.id}`);
+): Promise<{ drawer_id: string; memory_id: string; salience: number }> {
+  const category = mapHallToCategory(hall);
+  const result = await ingestMemory(
+    wingName,
+    roomName,
+    category,
+    content,
+    {
+      source: 'tool',
+      filePath: filePath ?? `${hall}/${wingName}-${roomName}-${Date.now()}.md`,
+      provenance: { triggerTool: 'add_drawer' },
     }
-  }
+  );
 
-  return { drawer_id: drawer.drawer_id, memory_id: memory.id };
+  return {
+    drawer_id: result.drawerId ?? '',
+    memory_id: result.memoryId,
+    salience: result.salienceScore,
+  };
+}
+
+/**
+ * Map hall type to category for ingestion.
+ */
+function mapHallToCategory(hall: HallType): CategoryType {
+  const mapping: Record<HallType, CategoryType> = {
+    'facts': 'general',
+    'events': 'system',
+    'discoveries': 'lesson',
+    'preferences': 'preference',
+    'advice': 'lesson',
+  };
+  return mapping[hall] ?? 'general';
 }
 
 /**
@@ -582,17 +600,29 @@ export async function toolResolveConflict(
 }
 
 /**
- * athenamem_diary_write — write AAAK diary entry.
+ * athenamem_diary_write — write AAAK diary entry (unified ingestion).
  */
 export async function toolDiaryWrite(
   agentName: string,
   entryType: string,
   content: string
-): Promise<{ memory_id: string }> {
-  const c = getContext();
-  c.palace.getOrCreateRoom(agentName, 'diary');
-  const { memory } = c.palace.addDrawer(agentName, 'diary', 'discoveries', `diary-${Date.now()}.md`, `[${entryType.toUpperCase()}] ${content}`);
-  return { memory_id: memory.id };
+): Promise<{ memory_id: string; salience: number }> {
+  const result = await ingestMemory(
+    agentName,
+    'diary',
+    'lesson',
+    `[${entryType.toUpperCase()}] ${content}`,
+    {
+      source: 'diary',
+      filePath: `diary/${agentName}-${Date.now()}.md`,
+      provenance: { triggerTool: 'diary_write' },
+    }
+  );
+
+  return {
+    memory_id: result.memoryId,
+    salience: result.salienceScore,
+  };
 }
 
 /**
@@ -715,12 +745,17 @@ export async function toolTraceMemory(memoryId: string): Promise<{
 
 /**
  * athenamem_explain_recall — why did these memories rank here?
+ * 
+ * ⚠️ CURRENT LIMITATION: This returns approximate explanations based on
+ * stored memory metadata. Full source breakdown requires orchestrator support.
  */
 export async function toolExplainRecall(
   query: string,
   resultMemoryIds: string[]
 ): Promise<{
   query: string;
+  approximate: boolean;
+  note: string;
   explanation: {
     memory_count: number;
     filters_applied: string[];
@@ -737,7 +772,7 @@ export async function toolExplainRecall(
 }> {
   const c = getContext();
   
-  // Get full memory objects
+  // ⚠️ APPROXIMATE: Using stored metadata since orchestrator doesn't pass full search context
   const memories: Array<{ memory: Memory; score: number; sourceScores: Record<string, number>; matched_keywords: string[] }> = [];
   
   for (const id of resultMemoryIds) {
@@ -746,8 +781,8 @@ export async function toolExplainRecall(
       memories.push({
         memory,
         score: memory.importance,
-        sourceScores: { athenamem: memory.importance },
-        matched_keywords: [], // Would need to track from search
+        sourceScores: { athenamem: memory.importance }, // Approximate
+        matched_keywords: [], // Would need search context
       });
     }
   }
@@ -756,6 +791,8 @@ export async function toolExplainRecall(
   
   return {
     query,
+    approximate: true,
+    note: 'Explanations are approximate. Full source breakdown requires orchestrator to pass search metadata.',
     explanation: {
       memory_count: memories.length,
       filters_applied: explanation.filters_applied,

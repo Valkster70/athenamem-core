@@ -73,11 +73,10 @@ export async function traceMemory(
   if (!memory) return null;
 
   // Get entry info
-  const entry = kg.getEntry(memory.entry_id);
+  const entry = kg.getEntryById(memory.entry_id);
 
   // Get facts derived from this memory
-  const facts = kg.queryRelations(memory.id)
-    .filter(r => r.source === memory.id)
+  const facts = kg.getRelationsBySource(memory.id)
     .map(r => ({
       subject: r.subject_id,
       predicate: r.predicate,

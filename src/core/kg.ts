@@ -398,6 +398,16 @@ export class KnowledgeGraph {
   }
 
   /**
+   * Get all relations where source matches a memory ID.
+   * This is used to trace facts derived from a specific memory.
+   */
+  getRelationsBySource(sourceId: string): Relation[] {
+    return this.db.prepare(`
+      SELECT * FROM relations WHERE source = ?
+    `).all(sourceId) as Relation[];
+  }
+
+  /**
    * Get all facts about an entity — both incoming and outgoing relations.
    */
   getEntityFacts(entityId: string, asOf: number = Date.now()): { outgoing: Relation[]; incoming: Relation[] } {
@@ -441,7 +451,6 @@ export class KnowledgeGraph {
       section, module, importance, contradiction_flag: false, contradiction_with: null,
       status: 'active', valid_to: null,
       created_at: now, last_accessed: null, access_count: 0
-    };
     };
   }
 
@@ -601,6 +610,13 @@ export class KnowledgeGraph {
    */
   getEntry(filePath: string): Entry | null {
     return this.db.prepare('SELECT * FROM entries WHERE file_path = ?').get(filePath) as Entry | undefined ?? null;
+  }
+
+  /**
+   * Get entry by ID.
+   */
+  getEntryById(entryId: string): Entry | null {
+    return this.db.prepare('SELECT * FROM entries WHERE entry_id = ?').get(entryId) as Entry | undefined ?? null;
   }
 
   /**

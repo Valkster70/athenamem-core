@@ -24,6 +24,21 @@ import {
   SalienceInput,
 } from './event.js';
 
+// Re-declare inferEntityType here to avoid circular dependencies
+function inferEntityType(name: string, defaultType: 'person' | 'project' | 'topic' | 'decision' | 'lesson' | 'preference' | 'agent' | 'event' = 'person'): any {
+  const lower = name.toLowerCase();
+  
+  if (/\b(app|project|system|service|api|bot|agent|tool)\b/.test(lower)) return 'project';
+  if (/\b(decision|choice|option|plan|strategy)\b/.test(lower)) return 'decision';
+  if (/\b(topic|concept|idea|pattern|architecture)\b/.test(lower)) return 'topic';
+  if (/\b(lesson|insight|learning|realization)\b/.test(lower)) return 'lesson';
+  if (/\b(preference|setting|config|default)\b/.test(lower)) return 'preference';
+  if (/\b(athena|athenamem|openclaw|codex|claude|gpt)\b/.test(lower)) return 'agent';
+  if (/^[A-Z][a-z]+$/.test(name) || name.includes('@')) return 'person';
+  
+  return defaultType;
+}
+
 export interface IngestionOptions {
   skipWAL?: boolean;
   skipContradictionCheck?: boolean;
@@ -116,13 +131,16 @@ export async function ingestMemoryEvent(
       if (!options.skipKGUpdate && facts.length > 0) {
         for (const fact of facts) {
           try {
-            const subject = ctx.kg.addEntity(fact.subject, 'person');
-            const object = ctx.kg.addEntity(fact.object, 'person');
+            const subjectType = inferEntityType(fact.subject, 'person');
+            const objectType = inferEntityType(fact.object, 'person');
+            const subject = ctx.kg.addEntity(fact.subject, subjectType);
+            const object = ctx.kg.addEntity(fact.object, objectType);
             ctx.kg.addRelation(
               subject.id,
               fact.predicate as any,
               object.id,
-              fact.confidence
+              fact.confidence,
+              memory.id  // Track source memory
             );
           } catch (err) {
             warnings.push(`Failed to add fact: ${fact.subject} ${fact.predicate} ${fact.object}`);
