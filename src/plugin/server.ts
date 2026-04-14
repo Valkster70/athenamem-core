@@ -21,6 +21,8 @@ import { WALManager, WALEntry } from '../core/wal.js';
 import { ContradictionDetector, extractFacts, checkAndFlagContradictions } from '../core/contradiction.js';
 import { CompactionEngine, RuleBasedCompiler } from '../core/compaction.js';
 import { SearchOrchestrator, SearchResult, SearchResponse } from '../search/orchestrator.js';
+import { MemoryEvent, CategoryType, MemorySource } from '../core/event.js';
+import { ingestMemoryEvent, IngestionResult } from '../core/ingestion.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -235,6 +237,51 @@ export async function onFlush(): Promise<{
 
   const frontier = c.compaction.getActiveFrontier();
   return { compacted, new_frontier_nodes: frontier.length };
+}
+
+// ─── Unified Ingestion Pipeline ────────────────────────────────────────────────
+
+/**
+ * Unified memory ingestion — THE single entry point for all memory writes.
+ * 
+ * All tools that create memory must use this function.
+ * It provides durability, auditability, salience scoring, and KG updates.
+ */
+export async function ingestMemory(
+  module: string,
+  section: string,
+  category: CategoryType,
+  content: string,
+  options: {
+    source?: MemorySource;
+    filePath?: string;
+    confidence?: number;
+    provenance?: { triggerTool?: string; parentMemoryIds?: string[] };
+    skipContradictionCheck?: boolean;
+  } = {}
+): Promise<IngestionResult> {
+  const c = getContext();
+  
+  const event: Omit<MemoryEvent, 'id' | 'createdAt' | 'state'> = {
+    sessionId: c.sessionId,
+    agentId: c.agentId,
+    moduleName: module,
+    sectionName: section,
+    category,
+    content,
+    source: options.source ?? 'tool',
+    confidence: options.confidence ?? 1.0,
+    salience: 0.5, // Will be computed by pipeline
+    provenance: {
+      triggerTool: options.provenance?.triggerTool,
+      filePath: options.filePath,
+      parentMemoryIds: options.provenance?.parentMemoryIds,
+    },
+  };
+  
+  return ingestMemoryEvent(c, event, {
+    skipContradictionCheck: options.skipContradictionCheck,
+  });
 }
 
 // ─── MCP Tools ─────────────────────────────────────────────────────────────────

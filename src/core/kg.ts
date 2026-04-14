@@ -707,4 +707,26 @@ export class KnowledgeGraph {
 
     txn();
   }
+
+  /**
+   * Update memory salience score.
+   */
+  updateMemorySalience(memoryId: string, salience: number): void {
+    this.db.prepare(`
+      UPDATE memories SET importance = ? WHERE id = ?
+    `).run(salience, memoryId);
+  }
+
+  /**
+   * Update memory access count and last_accessed.
+   */
+  touchMemory(memoryId: string): void {
+    const now = Date.now();
+    this.db.prepare(`
+      UPDATE memories 
+      SET access_count = COALESCE(access_count, 0) + 1, 
+          last_accessed = ? 
+      WHERE id = ?
+    `).run(now, memoryId);
+  }
 }
