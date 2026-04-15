@@ -96,6 +96,8 @@ async function runCommand(cmd: string, args: string[]): Promise<void> {
       return cmdRebuildFTS(kg);
     case 'doctor':
       return cmdDoctor(kg, palace, workDir);
+    case 'gap-scan':
+      return cmdGapScan(kg, args);
     case 'verify':
       return cmdVerify(kg, palace, args);
     case 'backfill-file':
@@ -136,6 +138,7 @@ function printHelp(cmd?: string): void {
     console.log('  search <query>        Quick search (qmd + KG only)');
     console.log('  rebuild-fts           Rebuild the FTS index');
     console.log('  doctor                Run health checks and repair hints');
+    console.log('  gap-scan [path]       Scan recent source files for likely ingestion gaps');
     console.log('  verify <query>        Smoke-test that a fact is searchable');
     console.log('  backfill-file <file> [wing room hall]  Ingest a source file into live memory');
     console.log('  wings [list]          List or manage wings');
@@ -162,6 +165,7 @@ function printHelp(cmd?: string): void {
     compact: 'Run DAG compaction\nUsage: athenamem compact',
     'rebuild-fts': 'Rebuild the FTS index from the live memory database\nUsage: athenamem rebuild-fts',
     doctor: 'Run health checks across DB, FTS, palace files, ClawVault, and qmd\nUsage: athenamem doctor',
+    'gap-scan': 'Scan recent markdown/text files and flag likely source-memory coverage gaps\nUsage: athenamem gap-scan [path]',
     verify: 'Smoke-test whether a query returns a plausible result\nUsage: athenamem verify <query>',
     'backfill-file': 'Ingest a markdown/text source file into live AthenaMem\nUsage: athenamem backfill-file <path> [wing room hall]',
   };
@@ -407,6 +411,58 @@ async function cmdRebuildFTS(kg: KnowledgeGraph): Promise<void> {
   console.log('✅ FTS index rebuilt');
 }
 
+function collectTextFiles(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const out: string[] = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...collectTextFiles(full));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const ext = path.extname(entry.name).toLowerCase();
+    if (!['.md', '.txt'].includes(ext)) continue;
+    out.push(full);
+  }
+  return out;
+}
+
+function extractProbeSnippets(content: string): string[] {
+  const ignorePatterns = [
+    /^\*\*session key/i,
+    /^\*\*session id/i,
+    /^session key:/i,
+    /^session id:/i,
+    /^timestamp:/i,
+    /^sender:/i,
+    /^channel:/i,
+    /^provider:/i,
+    /^surface:/i,
+    /^chat_type:/i,
+  ];
+
+  const lines = content
+    .split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+    .filter(l => !l.startsWith('#'))
+    .filter(l => l.length >= 24)
+    .filter(l => !ignorePatterns.some(pattern => pattern.test(l)))
+    .slice(0, 20);
+
+  const probes: string[] = [];
+  for (const line of lines) {
+    const cleaned = line.replace(/^[-*]\s*/, '').trim();
+    if (cleaned.length < 24) continue;
+    if (/^[A-Z0-9_\- ]+:$/.test(cleaned)) continue;
+    probes.push(cleaned.slice(0, 140));
+    if (probes.length >= 3) break;
+  }
+  return Array.from(new Set(probes));
+}
+
 async function cmdDoctor(kg: KnowledgeGraph, palace: Palace, workDir: string): Promise<void> {
   const dataDir = path.join(workDir, 'data');
   const dbPath = path.join(dataDir, 'athenamem.db');
@@ -457,6 +513,67 @@ async function cmdDoctor(kg: KnowledgeGraph, palace: Palace, workDir: string): P
       console.log(`- Check missing path: ${check.detail}`);
     }
   }
+}
+
+async function cmdGapScan(kg: KnowledgeGraph, args: string[]): Promise<void> {
+  const home = process.env.HOME ?? '/home/chris';
+  const scanRoot = path.resolve(args[0] ?? path.join(home, '.openclaw', 'workspace', 'memory'));
+  if (!fs.existsSync(scanRoot)) {
+    throw new Error(`Path not found: ${scanRoot}`);
+  }
+
+  const files = collectTextFiles(scanRoot)
+    .map(file => ({ file, stat: fs.statSync(file) }))
+    .sort((a, b) => b.stat.mtimeMs - a.stat.mtimeMs)
+    .slice(0, 25);
+
+  const gaps: Array<{ file: string; probes: string[] }> = [];
+  let checked = 0;
+
+  for (const item of files) {
+    const content = fs.readFileSync(item.file, 'utf-8');
+    const probes = extractProbeSnippets(content);
+    if (probes.length === 0) continue;
+    checked += 1;
+
+    let found = false;
+    for (const probe of probes) {
+      const rows = kg.searchMemories(probe, undefined, undefined, 3);
+      if (rows.some(row => row.content.toLowerCase().includes(probe.toLowerCase().slice(0, 24)))) {
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      gaps.push({ file: item.file, probes: probes.slice(0, 2) });
+    }
+  }
+
+  console.log(`# AthenaMem Gap Scan\n`);
+  console.log(`Scan root: ${scanRoot}`);
+  console.log(`Files checked: ${checked}`);
+  console.log(`Likely gaps: ${gaps.length}\n`);
+
+  if (gaps.length === 0) {
+    console.log('✅ No obvious ingestion gaps found in recently scanned files');
+    return;
+  }
+
+  for (const gap of gaps.slice(0, 10)) {
+    console.log(`❌ ${gap.file}`);
+    for (const probe of gap.probes) {
+      console.log(`   Probe: ${probe}`);
+    }
+    console.log(`   Fix: athenamem backfill-file ${gap.file}`);
+    console.log('');
+  }
+
+  if (gaps.length > 10) {
+    console.log(`...and ${gaps.length - 10} more`);
+  }
+
+  process.exitCode = 1;
 }
 
 async function cmdVerify(kg: KnowledgeGraph, palace: Palace, args: string[]): Promise<void> {
