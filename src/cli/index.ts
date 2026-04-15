@@ -1,6 +1,7 @@
+#!/usr/bin/env node
 /**
  * AthenaMem CLI
- * 
+ *
  * Command-line interface for AthenaMem memory operations.
  * 
  * Usage:
