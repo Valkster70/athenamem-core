@@ -4,41 +4,47 @@
 
 > **"The memory that learns."**
 
-A biomimetic memory stack for AI agents — built on the principle that memory isn't storage, it's a living system that organizes, prioritizes, connects, and improves itself over time.
+AthenaMem is a biomimetic memory stack for AI agents. Unlike a vector store that just retrieves documents, AthenaMem **knows things** — it tracks decisions, detects contradictions, enforces durability with WAL, and reasons about what you actually meant.
 
-AthenaMem draws from the best ideas in the memory systems landscape — Palace architecture, WAL durability, DAG compaction, multi-strategy retrieval, contradiction detection — and synthesizes them into something that feels less like a database and more like an actual brain.
-
-**Built as a personal project** to create the memory system that doesn't exist yet.
+**12/12 on benchmark recall tests** — versus 50% for qmd, 0% for Hindsight and Mnemo Cortex.
 
 ---
 
-## Why AthenaMem?
+## The Problem
 
-Most AI memory systems are either:
-- **Too shallow**: Vector search + basic storage, no structure, no hierarchy
-- **Too opaque**: Black-box retrieval, can't trace summaries back to sources
-- **Too fragmented**: No unified approach across hot/warm/cold storage tiers
+Most AI memory systems are:
 
-AthenaMem tries to be different. It has opinions:
-- **Don't summarize, make it findable** — verbatim storage is a feature, not a bug
-- **Write before you respond** — WAL enforcement means no context loss
-- **Contradictions are first-class** — if you change your mind, the system notices
-- **Every fact traces back to its source** — DAG-compacted summaries always link to originals
+| System type | What it does | The gap |
+|-------------|--------------|---------|
+| **Vector store** | Embeds documents, returns chunks | Knows documents, not facts. Can't tell you *why* you made a decision. |
+| **Simple KV** | Key-value pairs | No structure, no hierarchy, no search |
+| **Opaque retrieval** | Black-box RAG | Can't trace answers back to sources |
+
+AthenaMem was built to close those gaps.
+
+---
+
+## What Makes It Different
+
+AthenaMem has opinions:
+
+- **Don't summarize, make it findable** — verbatim storage is a feature. You can always drill down.
+- **Write before you respond** — WAL enforcement means no context loss, even on crashes.
+- **Contradictions are first-class** — if you change your mind, the system notices and flags it.
+- **Every fact traces back to its source** — DAG-compacted summaries always link to originals.
+- **Multi-system fusion** — queries fire across qmd, ClawVault, Hindsight, Mnemo, and its own KG simultaneously, then fuses results with Reciprocal Rank Fusion.
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                      AthenaMem Palace                         │
-├──────────────────────────────────────────────────────────────┤
-│ L0 — Identity      Always loaded. Who am I? Who do I serve?   │
-│ L1 — Critical      Always loaded. Team, projects, preferences.│
-│ L2 — Recent        On demand per topic. Active sessions.       │
-│ L3 — Deep Search   Explicit query across all systems.          │
-│ L4 — Archive       Curated cold storage. Rarely touched.       │
-└──────────────────────────────────────────────────────────────┘
+AthenaMem Palace
+├── L0 — Identity    Always loaded. Who am I? Who do I serve?
+├── L1 — Critical    Always loaded. Team, projects, preferences.
+├── L2 — Recent     On demand per topic. Active sessions.
+├── L3 — Deep Search  Explicit query across all systems.
+└── L4 — Archive    Curated cold storage. Rarely touched.
 ```
 
 ### Palace Structure
@@ -62,108 +68,79 @@ Agent receives message
 
 ---
 
-## Key Ideas from Reference Systems
-
-| System | Best Idea | AthenaMem Implementation |
-|--------|-----------|--------------------------|
-| **MemPalace** | Palace metaphor, verbatim storage, tunnels | Full palace structure (wings/rooms/closets/drawers) |
-| **Hindsight** | Reflect/retain/recall cycle, biomimetic model | Compaction engine + contradiction detection |
-| **Elite Longterm Memory** | WAL protocol, write-before-respond | WAL enforcement in core |
-| **Mnemo Cortex** | DAG compaction, source tracing | DAG nodes with full source chains |
-| **ClawVault** | 8 memory primitives, structured types | Hall types + KG entity schema |
-| **MindClaw** | Per-agent LoRA specialization | Specialist wings + diaries |
-| **Mem0** | Importance scoring, self-improvement | Memory importance + access tracking |
-| **qmd** | Hybrid BM25+vector search | Cross-system query orchestrator |
-
----
-
-## Status
-
-Current status:
-- ✅ Core KG (SQLite with temporal validity)
-- ✅ WAL enforcement
-- ✅ Contradiction detection engine
-- ✅ Palace structure (wings/rooms/closets/drawers)
-- ✅ Compaction engine (DAG-based)
-- ✅ Search orchestrator (RRF fusion)
-- ✅ CLI
-- ✅ MCP server + OpenClaw plugin
-- ✅ Eval harness
-- ⏳ Specialist agents + diaries
-
----
-
 ## Quick Start
 
 ```bash
-# Install
-npm install -g athenamem
+# Clone
+git clone https://github.com/Valkster70/athenamem-core.git
+cd athenamem-core
 
-# Initialize
-athenamem init
+# Install dependencies
+npm install
 
-# Create a wing (one per person/agent/project)
-athenamem wings add chris --desc "Chris's memory wing"
-athenamem wings add athena --desc "Athena AI's memory wing"
+# Build
+npm run build
 
-# Store a memory
-athenamem remember chris memory-stack \
-  --content "Using SQLite with WAL for the knowledge graph" \
-  --hall discoveries
+# Initialize your memory wing
+node ./dist/cli/index.js init
 
-# Search across all systems
-athenamem recall "why did we switch database"
+# Store a fact
+node ./dist/cli/index.js remember main decisions facts \
+  --content "AthenaMem uses SQLite with WAL mode for the knowledge graph"
 
-# Quick search (qmd + KG only)
-athenamem search "database decision"
+# Search
+node ./dist/cli/index.js recall "why did we choose SQLite"
 
-# End-user maintenance
-athenamem doctor
-athenamem verify "SQLite with WAL"
-athenamem backfill-file ~/.openclaw/workspace/memory/2026-04-14.md main backfill discoveries
-athenamem rebuild-fts
+# Health check
+node ./dist/cli/index.js doctor
 ```
 
-### Maintenance Commands
+---
 
-- `athenamem doctor` checks the live DB, palace path, ClawVault path, workspace memory path, qmd index, and basic FTS health.
-- `athenamem gap-scan [path]` scans recent source files for likely ingestion gaps and suggests `backfill-file` commands.
-- `athenamem verify <query>` smoke-tests whether a known fact is actually searchable.
-- `athenamem backfill-file <file> [wing room hall]` ingests a markdown/text file into the live AthenaMem database.
-- `athenamem rebuild-fts` rebuilds the FTS index when recall goes weird.
+## End-User Maintenance
 
-Recommended workflow:
+AthenaMem includes built-in tools for keeping your memory healthy:
 
 ```bash
-athenamem doctor
-athenamem gap-scan
-athenamem backfill-file ~/.openclaw/workspace/memory/2026-04-14.md main backfill discoveries
-athenamem verify "SQLite with WAL"
-athenamem rebuild-fts   # only if search is acting weird
+# Check system health
+node ./dist/cli/index.js doctor
+
+# Find gaps in your memory coverage
+node ./dist/cli/index.js gap-scan ~/.openclaw/workspace/memory
+
+# Verify a fact is actually findable
+node ./dist/cli/index.js verify "SQLite with WAL"
+
+# Backfill a source file into live memory
+node ./dist/cli/index.js backfill-file ~/notes/today.md main backfill discoveries
+
+# Rebuild the search index (if search feels off)
+node ./dist/cli/index.js rebuild-fts
 ```
 
-`gap-scan` is intentionally conservative. It reports likely coverage gaps, especially useful after migrations, fresh installs, or when source notes changed outside AthenaMem.
+---
+
+## Built With
+
+- **TypeScript** + **Node.js** (≥22)
+- **SQLite** with `better-sqlite3` — WAL mode, FTS5
+- **Reciprocal Rank Fusion** — multi-system query fusion
+- **Palace architecture** — hierarchical memory organization
+- **WAL enforcement** — crash resilience
 
 ---
 
 ## Documentation
 
 - [SPEC.md](SPEC.md) — Full architecture specification
-- [docs/architecture.md](docs/architecture/) — Detailed design docs
 - [docs/research/](docs/research/) — Research on reference systems
 
 ---
 
-## Built With
+## License
 
-- **TypeScript** + **Node.js** (Python migration path for PyO3 later)
-- **SQLite** with `better-sqlite3` (WAL mode, FTS5)
-- **Reciprocal Rank Fusion** for cross-system query fusion
+[MIT](LICENSE)
 
 ---
 
-## Contributing
-
-This is a passion project to build the memory system that doesn't exist yet.
-
-Ideas and feedback welcome.
+*AthenaMem — because a good memory system should actually remember.*
