@@ -2,7 +2,7 @@
   "name": "athenamem",
   "version": "0.1.0",
   "description": "Biomimetic memory stack for AI agents — palace architecture, WAL enforcement, contradiction detection, DAG compaction",
-  "author": "Chris Valk",
+  "author": "AthenaMem Team",
   "openclaw": {
     "compatibility": ">=2026.4.0",
     "requires": ["gateway", "gateway.router", "gateway.llm", "gateway.memory"]
