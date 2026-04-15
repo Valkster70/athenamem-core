@@ -72,7 +72,7 @@ Agent receives message
 
 ```bash
 # Clone
-git clone https://github.com/Valkster70/athenamem-core.git
+git clone <your-repo-url>
 cd athenamem-core
 
 # Install dependencies
@@ -106,13 +106,13 @@ AthenaMem includes built-in tools for keeping your memory healthy:
 node ./dist/cli/index.js doctor
 
 # Find gaps in your memory coverage
-node ./dist/cli/index.js gap-scan ~/.openclaw/workspace/memory
+node ./dist/cli/index.js gap-scan ./memory
 
 # Verify a fact is actually findable
 node ./dist/cli/index.js verify "SQLite with WAL"
 
 # Backfill a source file into live memory
-node ./dist/cli/index.js backfill-file ~/notes/today.md main backfill discoveries
+node ./dist/cli/index.js backfill-file ./notes/today.md main backfill discoveries
 
 # Rebuild the search index (if search feels off)
 node ./dist/cli/index.js rebuild-fts

@@ -194,13 +194,13 @@ Optional: Contradiction Check → KG Update
 
 ```json
 {
-  "data_dir": "~/.openclaw/workspace/athenamem/data",
-  "structure_dir": "~/.openclaw/workspace/athenamem/structure",
+  "data_dir": "./athenamem/data",
+  "structure_dir": "./athenamem/structure",
   "compact_on_flush": true,
   "contradiction_check": true,
   "auto_wal": true,
   "qmd_path": "~/.cache/qmd",
-  "clawvault_path": "~/.openclaw/workspace/memory",
+  "clawvault_path": "./memory",
   "hindsight_url": "http://127.0.0.1:8888",
   "mnemo_url": "http://127.0.0.1:50001"
 }
