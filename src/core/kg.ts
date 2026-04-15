@@ -519,7 +519,7 @@ export class KnowledgeGraph {
       // FTS may fail for some queries, fall through to LIKE
     }
 
-    // Fallback: LIKE query (full query + keyword terms)
+    // Fallback: LIKE query (full query + keyword terms) with lexical ranking
     try {
       const tokens = q
         .toLowerCase()
@@ -528,7 +528,8 @@ export class KnowledgeGraph {
         .filter(t => t.length >= 4)
         .slice(0, 8);
 
-      const termClauses: string[] = ['content LIKE @like'];
+      const matchClauses: string[] = ['content LIKE @like'];
+      const scoreClauses: string[] = ['CASE WHEN lower(content) LIKE lower(@like) THEN 100 ELSE 0 END'];
       const fallbackParams: Record<string, string | number> = {
         like: `%${q}%`,
         limit,
@@ -536,11 +537,16 @@ export class KnowledgeGraph {
 
       tokens.forEach((t, i) => {
         const key = `term${i}`;
-        termClauses.push(`content LIKE @${key}`);
+        matchClauses.push(`content LIKE @${key}`);
+        scoreClauses.push(`CASE WHEN lower(content) LIKE lower(@${key}) THEN 10 ELSE 0 END`);
         fallbackParams[key] = `%${t}%`;
       });
 
-      let fallbackSql = `SELECT * FROM memories WHERE (${termClauses.join(' OR ')})`;
+      let fallbackSql = `
+        SELECT *, (${scoreClauses.join(' + ')}) AS lexical_score
+        FROM memories
+        WHERE (${matchClauses.join(' OR ')})
+      `;
 
       if (module) {
         fallbackSql += ' AND module = @module';
@@ -551,9 +557,9 @@ export class KnowledgeGraph {
         fallbackParams['section'] = section;
       }
 
-      fallbackSql += ' ORDER BY created_at DESC LIMIT @limit';
+      fallbackSql += ' ORDER BY lexical_score DESC, created_at DESC LIMIT @limit';
 
-      const rows = this.db.prepare(fallbackSql).all(fallbackParams) as Memory[];
+      const rows = this.db.prepare(fallbackSql).all(fallbackParams) as (Memory & { lexical_score?: number })[];
       return rows.map(row => ({ ...row, contradiction_flag: (row as any).contradiction_flag === 1 }));
     } catch {
       return [];
