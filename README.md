@@ -127,9 +127,22 @@ athenamem rebuild-fts
 ### Maintenance Commands
 
 - `athenamem doctor` checks the live DB, palace path, ClawVault path, workspace memory path, qmd index, and basic FTS health.
+- `athenamem gap-scan [path]` scans recent source files for likely ingestion gaps and suggests `backfill-file` commands.
 - `athenamem verify <query>` smoke-tests whether a known fact is actually searchable.
 - `athenamem backfill-file <file> [wing room hall]` ingests a markdown/text file into the live AthenaMem database.
 - `athenamem rebuild-fts` rebuilds the FTS index when recall goes weird.
+
+Recommended workflow:
+
+```bash
+athenamem doctor
+athenamem gap-scan
+athenamem backfill-file ~/.openclaw/workspace/memory/2026-04-14.md main backfill discoveries
+athenamem verify "SQLite with WAL"
+athenamem rebuild-fts   # only if search is acting weird
+```
+
+`gap-scan` is intentionally conservative. It reports likely coverage gaps, especially useful after migrations, fresh installs, or when source notes changed outside AthenaMem.
 
 ---
 
