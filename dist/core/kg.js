@@ -214,7 +214,9 @@ export class KnowledgeGraph {
             const sql = include_expired
                 ? 'SELECT * FROM entities WHERE id = ?'
                 : 'SELECT * FROM entities WHERE id = ? AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ?';
-            const row = this.db.prepare(sql).get(entity_id, as_of, as_of);
+            const row = include_expired
+                ? this.db.prepare(sql).get(entity_id)
+                : this.db.prepare(sql).get(entity_id, as_of, as_of);
             return row ? [this.parseEntity(row)] : [];
         }
         if (entity_name) {
@@ -229,7 +231,10 @@ export class KnowledgeGraph {
         const sql = include_expired
             ? 'SELECT * FROM entities'
             : 'SELECT * FROM entities WHERE (valid_to IS NULL OR valid_to > ?) AND valid_from <= ?';
-        return this.db.prepare(sql).all(as_of, as_of).map(this.parseEntity);
+        const rows = include_expired
+            ? this.db.prepare(sql).all()
+            : this.db.prepare(sql).all(as_of, as_of);
+        return rows.map(this.parseEntity);
     }
     /**
      * Get entity by name and type.
