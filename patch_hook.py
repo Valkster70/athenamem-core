@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-f = '/home/chris/.openclaw/extensions/athenamem-core/dist/index.js'
+import os
+f = os.path.join(os.path.expanduser('~/.openclaw/extensions/athenamem-core/dist'), 'index.js')
 c = open(f).read()
 
 # Fix: Replace autoRecallRan flag with time-based check (run at most once per 30 min)
