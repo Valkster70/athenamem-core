@@ -92,6 +92,7 @@ export declare class SearchOrchestrator {
     private toRankedMap;
     private tokenizeQuery;
     private computeLexicalBoost;
+    private computeLexicalStats;
     private findResultById;
     /**
      * Quick search — just fires qmd + KG, skips slower systems.

@@ -100,8 +100,11 @@ export class SearchOrchestrator {
             // Find the best-scoring result for this ID across all systems
             const res = this.findResultById(rankedLists, id);
             if (res) {
-                const lexicalBoost = this.computeLexicalBoost(query, `${res.content}\n${res.source_name}`);
-                res.score = score * lexicalBoost;
+                const lexicalText = `${res.content}\n${res.source_name}`;
+                const lexical = this.computeLexicalStats(query, lexicalText);
+                if (!lexical.passesThreshold)
+                    continue;
+                res.score = score * lexical.boost;
                 allResults.push(res);
             }
         }
@@ -374,17 +377,25 @@ export class SearchOrchestrator {
             .filter(t => t.length >= 2)));
     }
     computeLexicalBoost(query, haystack) {
+        return this.computeLexicalStats(query, haystack).boost;
+    }
+    computeLexicalStats(query, haystack) {
         const text = haystack.toLowerCase();
         const tokens = this.tokenizeQuery(query);
         if (tokens.length === 0)
-            return 1;
+            return { boost: 1, passesThreshold: true };
         let matches = 0;
         for (const token of tokens) {
             if (text.includes(token))
                 matches += 1;
         }
+        const coverage = matches / tokens.length;
         const fullQueryMatch = text.includes(query.toLowerCase()) ? 0.75 : 0;
-        return 1 + (matches / tokens.length) + fullQueryMatch;
+        const passesThreshold = tokens.length <= 1 || fullQueryMatch > 0 || coverage >= 0.5;
+        return {
+            boost: 1 + coverage + fullQueryMatch,
+            passesThreshold,
+        };
     }
     findResultById(rankedLists, id) {
         for (const map of rankedLists) {
