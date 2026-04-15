@@ -416,19 +416,20 @@ async function cmdDoctor(kg: KnowledgeGraph, palace: Palace, workDir: string): P
 
   const stats = kg.stats();
   const wings = palace.listWings();
-  const checks: Array<{ name: string; ok: boolean; detail: string }> = [];
+  const checks: Array<{ name: string; ok: boolean; detail: string; optional?: boolean }> = [];
 
   checks.push({ name: 'Live DB', ok: fs.existsSync(dbPath), detail: dbPath });
   checks.push({ name: 'Palace dir', ok: fs.existsSync(path.join(workDir, 'palace')), detail: path.join(workDir, 'palace') });
-  checks.push({ name: 'ClawVault', ok: fs.existsSync(clawvaultPath), detail: clawvaultPath });
+  checks.push({ name: 'ClawVault', ok: fs.existsSync(clawvaultPath), detail: clawvaultPath, optional: true });
   checks.push({ name: 'Workspace memory', ok: fs.existsSync(memoryPath), detail: memoryPath });
-  checks.push({ name: 'qmd index', ok: fs.existsSync(qmdIndex), detail: qmdIndex });
+  checks.push({ name: 'qmd index', ok: fs.existsSync(qmdIndex), detail: qmdIndex, optional: true });
   checks.push({ name: 'FTS populated', ok: stats.memory_count > 0, detail: `${stats.memory_count} memories in live DB` });
   checks.push({ name: 'Palace content', ok: wings.length > 0, detail: `${wings.length} wings` });
 
   console.log('# AthenaMem Doctor\n');
   for (const check of checks) {
-    console.log(`${check.ok ? '✅' : '❌'} ${check.name}: ${check.detail}`);
+    const icon = check.ok ? '✅' : (check.optional ? '⚠️' : '❌');
+    console.log(`${icon} ${check.name}: ${check.detail}`);
   }
 
   console.log('\n## Summary');
@@ -437,14 +438,15 @@ async function cmdDoctor(kg: KnowledgeGraph, palace: Palace, workDir: string): P
   console.log(`Memories: ${stats.memory_count}`);
   console.log(`Wings: ${wings.length}`);
 
-  const failed = checks.filter(c => !c.ok);
-  if (failed.length === 0) {
+  const failed = checks.filter(c => !c.ok && !c.optional);
+  const warnings = checks.filter(c => !c.ok && c.optional);
+  if (failed.length === 0 && warnings.length === 0) {
     console.log('\n✅ Doctor passed');
     return;
   }
 
-  console.log('\n## Suggested fixes');
-  for (const check of failed) {
+  console.log(`\n## Suggested fixes${warnings.length ? ' / optional improvements' : ''}`);
+  for (const check of [...failed, ...warnings]) {
     if (check.name === 'FTS populated') {
       console.log('- Run: athenamem rebuild-fts');
     } else if (check.name === 'ClawVault') {
@@ -462,7 +464,8 @@ async function cmdVerify(kg: KnowledgeGraph, palace: Palace, args: string[]): Pr
   if (!query) throw new Error('Usage: athenamem verify <query>');
 
   const orchestrator = new SearchOrchestrator(kg, palace);
-  const results = await orchestrator.quickSearch(query, 5);
+  const response = await orchestrator.deepSearch(query, 5);
+  const results = response.results;
   console.log(`# Verify: ${query}\n`);
   if (results.length === 0) {
     console.log('❌ No results');
@@ -474,6 +477,7 @@ async function cmdVerify(kg: KnowledgeGraph, palace: Palace, args: string[]): Pr
   console.log(`✅ Top hit: ${top.content.substring(0, 220)}`);
   console.log(`Source: ${top.source_name}`);
   console.log(`Score: ${top.score.toFixed(3)}`);
+  console.log(`Systems with results: ${response.sources_with_results.join(', ') || 'none'}`);
 }
 
 async function cmdBackfillFile(kg: KnowledgeGraph, palace: Palace, args: string[]): Promise<void> {
