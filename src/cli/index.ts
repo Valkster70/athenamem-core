@@ -468,20 +468,24 @@ async function cmdVerify(kg: KnowledgeGraph, palace: Palace, args: string[]): Pr
   const results = response.results;
   console.log(`# Verify: ${query}\n`);
   if (results.length === 0) {
-    const fallbackMemories = kg.searchMemories(query, undefined, undefined, 3);
-    if (fallbackMemories.length > 0) {
-      const top = fallbackMemories[0];
-      console.log(`✅ Fallback memory hit: ${top.content.substring(0, 220)}`);
-      console.log('Source: AthenaMem KG memory');
-      return;
-    }
-
     const tokens = query
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, ' ')
       .split(/\s+/)
       .map(t => t.trim())
       .filter(t => t.length >= 2);
+
+    const fallbackMemories = kg.searchMemories(query, undefined, undefined, 5).filter(mem => {
+      const lower = mem.content.toLowerCase();
+      const matches = tokens.filter(token => lower.includes(token)).length;
+      return tokens.length === 0 ? true : (matches / tokens.length) >= 0.5;
+    });
+    if (fallbackMemories.length > 0) {
+      const top = fallbackMemories[0];
+      console.log(`✅ Fallback memory hit: ${top.content.substring(0, 220)}`);
+      console.log('Source: AthenaMem KG memory');
+      return;
+    }
 
     for (const token of tokens) {
       const entity = kg.getEntityByName(token);
