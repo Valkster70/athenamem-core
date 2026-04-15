@@ -395,7 +395,6 @@ function extractProbeSnippets(content) {
         .filter(Boolean)
         .filter(l => !l.startsWith('#'))
         .filter(l => l.length >= 24)
-        .filter(l => !ignorePatterns.some(pattern => pattern.test(l)))
         .slice(0, 20);
     const probes = [];
     for (const line of lines) {
@@ -403,6 +402,8 @@ function extractProbeSnippets(content) {
         if (cleaned.length < 24)
             continue;
         if (/^[A-Z0-9_\- ]+:$/.test(cleaned))
+            continue;
+        if (ignorePatterns.some(pattern => pattern.test(cleaned)))
             continue;
         probes.push(cleaned.slice(0, 140));
         if (probes.length >= 3)
