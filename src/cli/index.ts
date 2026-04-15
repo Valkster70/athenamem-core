@@ -446,6 +446,7 @@ function extractProbeSnippets(content: string): string[] {
   const lines = content
     .split('\n')
     .map(l => l.trim())
+    .map(l => l.replace(/[*_`]/g, ''))
     .filter(Boolean)
     .filter(l => !l.startsWith('#'))
     .filter(l => l.length >= 24)

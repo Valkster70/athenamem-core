@@ -376,18 +376,35 @@ function collectTextFiles(dir) {
     return out;
 }
 function extractProbeSnippets(content) {
+    const ignorePatterns = [
+        /^\*\*session key/i,
+        /^\*\*session id/i,
+        /^session key:/i,
+        /^session id:/i,
+        /^timestamp:/i,
+        /^sender:/i,
+        /^channel:/i,
+        /^provider:/i,
+        /^surface:/i,
+        /^chat_type:/i,
+    ];
     const lines = content
         .split('\n')
         .map(l => l.trim())
+        .map(l => l.replace(/[*_`]/g, ''))
         .filter(Boolean)
         .filter(l => !l.startsWith('#'))
         .filter(l => l.length >= 24)
-        .slice(0, 12);
+        .filter(l => !ignorePatterns.some(pattern => pattern.test(l)))
+        .slice(0, 20);
     const probes = [];
     for (const line of lines) {
         const cleaned = line.replace(/^[-*]\s*/, '').trim();
-        if (cleaned.length >= 24)
-            probes.push(cleaned.slice(0, 140));
+        if (cleaned.length < 24)
+            continue;
+        if (/^[A-Z0-9_\- ]+:$/.test(cleaned))
+            continue;
+        probes.push(cleaned.slice(0, 140));
         if (probes.length >= 3)
             break;
     }
