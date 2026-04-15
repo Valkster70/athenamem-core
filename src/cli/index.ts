@@ -468,6 +468,38 @@ async function cmdVerify(kg: KnowledgeGraph, palace: Palace, args: string[]): Pr
   const results = response.results;
   console.log(`# Verify: ${query}\n`);
   if (results.length === 0) {
+    const fallbackMemories = kg.searchMemories(query, undefined, undefined, 3);
+    if (fallbackMemories.length > 0) {
+      const top = fallbackMemories[0];
+      console.log(`✅ Fallback memory hit: ${top.content.substring(0, 220)}`);
+      console.log('Source: AthenaMem KG memory');
+      return;
+    }
+
+    const tokens = query
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .map(t => t.trim())
+      .filter(t => t.length >= 2);
+
+    for (const token of tokens) {
+      const entity = kg.getEntityByName(token);
+      if (!entity) continue;
+      const facts = kg.getEntityFacts(entity.id);
+      const rel = facts.outgoing[0] ?? facts.incoming[0];
+      if (rel) {
+        const otherId = rel.subject_id === entity.id ? rel.object_id : rel.subject_id;
+        const other = kg.queryEntities({ entity_id: otherId })[0];
+        const text = rel.subject_id === entity.id
+          ? `${entity.name} ${rel.predicate} ${other?.name ?? otherId}`
+          : `${other?.name ?? otherId} ${rel.predicate} ${entity.name}`;
+        console.log(`✅ Fallback KG fact hit: ${text}`);
+        console.log('Source: AthenaMem KG relation');
+        return;
+      }
+    }
+
     console.log('❌ No results');
     process.exitCode = 1;
     return;
