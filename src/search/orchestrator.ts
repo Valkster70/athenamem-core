@@ -305,14 +305,18 @@ export class SearchOrchestrator {
     }
 
     const normalizedQuery = query.toLowerCase();
+    const tokens = this.tokenizeQuery(query);
     const results: SearchResult[] = [];
     const files = this.collectFiles(basePath);
 
     for (const file of files) {
-      if (results.length >= limit) break;
-
       const content = this.safeReadText(file);
-      if (content == null || !content.toLowerCase().includes(normalizedQuery)) continue;
+      if (content == null) continue;
+
+      const lower = content.toLowerCase();
+      const matchCount = tokens.filter(token => lower.includes(token)).length;
+      const wholeQueryMatch = lower.includes(normalizedQuery);
+      if (!wholeQueryMatch && matchCount === 0) continue;
 
       const relative = path.relative(this.clawvaultPath, file);
       const parts = relative.split(path.sep).filter(Boolean);
@@ -324,14 +328,16 @@ export class SearchOrchestrator {
         content: content.length > 300 ? `${content.slice(0, 300)}...` : content,
         source: 'clawvault',
         source_name: `ClawVault/${parts.slice(0, 2).join('/')}`,
-        score: 0.5,
+        score: this.computeLexicalBoost(query, `${relative}\n${content}`),
         module: parts[0],
         section: parts[1],
         url: file,
       });
     }
 
-    return results;
+    return results
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
   }
 
   private async queryHindsight(query: string, limit: number): Promise<SearchResult[]> {
