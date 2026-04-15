@@ -31,7 +31,7 @@ import { WALManager } from '../core/wal.js';
 import { SearchOrchestrator, formatSearchResults } from '../search/orchestrator.js';
 import * as fs from 'fs';
 import * as path from 'path';
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 // ─── CLI Entry Point ───────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
 if (args.length === 0) {
@@ -82,6 +82,12 @@ async function runCommand(cmd, args) {
             return cmdSearch(kg, palace, args);
         case 'rebuild-fts':
             return cmdRebuildFTS(kg);
+        case 'doctor':
+            return cmdDoctor(kg, palace, workDir);
+        case 'verify':
+            return cmdVerify(kg, palace, args);
+        case 'backfill-file':
+            return cmdBackfillFile(kg, palace, args);
         case 'wings':
             return cmdWings(palace, args);
         case 'rooms':
@@ -115,6 +121,10 @@ function printHelp(cmd) {
         console.log('  remember              Store a new memory');
         console.log('  recall <query>        Search across all memory systems');
         console.log('  search <query>        Quick search (qmd + KG only)');
+        console.log('  rebuild-fts           Rebuild the FTS index');
+        console.log('  doctor                Run health checks and repair hints');
+        console.log('  verify <query>        Smoke-test that a fact is searchable');
+        console.log('  backfill-file <file> [wing room hall]  Ingest a source file into live memory');
         console.log('  wings [list]          List or manage wings');
         console.log('  rooms <wing>            List rooms in a wing');
         console.log('  diary <agent>         Write/read agent diary');
@@ -136,6 +146,10 @@ function printHelp(cmd) {
         diary: 'Write/read agent diary\nUsage: athenamem diary <agent> [write <content> | read]',
         audit: 'Check for contradictions\nUsage: athenamem audit',
         compact: 'Run DAG compaction\nUsage: athenamem compact',
+        'rebuild-fts': 'Rebuild the FTS index from the live memory database\nUsage: athenamem rebuild-fts',
+        doctor: 'Run health checks across DB, FTS, palace files, ClawVault, and qmd\nUsage: athenamem doctor',
+        verify: 'Smoke-test whether a query returns a plausible result\nUsage: athenamem verify <query>',
+        'backfill-file': 'Ingest a markdown/text source file into live AthenaMem\nUsage: athenamem backfill-file <path> [wing room hall]',
     };
     console.log(helpText[cmd] || `No detailed help for: ${cmd}`);
 }
@@ -336,6 +350,96 @@ async function cmdRebuildFTS(kg) {
     console.log('Rebuilding FTS index...');
     kg.rebuildFTSIndex();
     console.log('✅ FTS index rebuilt');
+}
+async function cmdDoctor(kg, palace, workDir) {
+    const dataDir = path.join(workDir, 'data');
+    const dbPath = path.join(dataDir, 'athenamem.db');
+    const clawvaultPath = path.join(process.env.HOME ?? '/home/chris', '.clawvault');
+    const memoryPath = path.join(process.env.HOME ?? '/home/chris', '.openclaw', 'workspace', 'memory');
+    const qmdIndex = path.join(process.env.HOME ?? '/home/chris', '.cache', 'qmd', 'index.sqlite');
+    const stats = kg.stats();
+    const wings = palace.listWings();
+    const checks = [];
+    checks.push({ name: 'Live DB', ok: fs.existsSync(dbPath), detail: dbPath });
+    checks.push({ name: 'Palace dir', ok: fs.existsSync(path.join(workDir, 'palace')), detail: path.join(workDir, 'palace') });
+    checks.push({ name: 'ClawVault', ok: fs.existsSync(clawvaultPath), detail: clawvaultPath });
+    checks.push({ name: 'Workspace memory', ok: fs.existsSync(memoryPath), detail: memoryPath });
+    checks.push({ name: 'qmd index', ok: fs.existsSync(qmdIndex), detail: qmdIndex });
+    checks.push({ name: 'FTS populated', ok: stats.memory_count > 0, detail: `${stats.memory_count} memories in live DB` });
+    checks.push({ name: 'Palace content', ok: wings.length > 0, detail: `${wings.length} wings` });
+    console.log('# AthenaMem Doctor\n');
+    for (const check of checks) {
+        console.log(`${check.ok ? '✅' : '❌'} ${check.name}: ${check.detail}`);
+    }
+    console.log('\n## Summary');
+    console.log(`Entities: ${stats.entity_count}`);
+    console.log(`Relations: ${stats.relation_count}`);
+    console.log(`Memories: ${stats.memory_count}`);
+    console.log(`Wings: ${wings.length}`);
+    const failed = checks.filter(c => !c.ok);
+    if (failed.length === 0) {
+        console.log('\n✅ Doctor passed');
+        return;
+    }
+    console.log('\n## Suggested fixes');
+    for (const check of failed) {
+        if (check.name === 'FTS populated') {
+            console.log('- Run: athenamem rebuild-fts');
+        }
+        else if (check.name === 'ClawVault') {
+            console.log('- Run: clawvault init ~/.clawvault');
+        }
+        else if (check.name === 'qmd index') {
+            console.log('- Run: qmd update && qmd embed');
+        }
+        else {
+            console.log(`- Check missing path: ${check.detail}`);
+        }
+    }
+}
+async function cmdVerify(kg, palace, args) {
+    const query = args.join(' ');
+    if (!query)
+        throw new Error('Usage: athenamem verify <query>');
+    const orchestrator = new SearchOrchestrator(kg, palace);
+    const results = await orchestrator.quickSearch(query, 5);
+    console.log(`# Verify: ${query}\n`);
+    if (results.length === 0) {
+        console.log('❌ No results');
+        process.exitCode = 1;
+        return;
+    }
+    const top = results[0];
+    console.log(`✅ Top hit: ${top.content.substring(0, 220)}`);
+    console.log(`Source: ${top.source_name}`);
+    console.log(`Score: ${top.score.toFixed(3)}`);
+}
+async function cmdBackfillFile(kg, palace, args) {
+    if (args.length < 1) {
+        throw new Error('Usage: athenamem backfill-file <path> [wing room hall]');
+    }
+    const [filePathArg, wing = 'main', room = 'backfill', hall = 'discoveries'] = args;
+    const filePath = path.resolve(filePathArg);
+    if (!fs.existsSync(filePath)) {
+        throw new Error(`File not found: ${filePath}`);
+    }
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+        throw new Error(`Not a file: ${filePath}`);
+    }
+    if (stat.size > 1024 * 1024) {
+        throw new Error('Refusing to backfill files larger than 1MB');
+    }
+    const content = fs.readFileSync(filePath, 'utf-8').trim();
+    if (!content) {
+        throw new Error('File is empty');
+    }
+    const targetPath = `backfill/${path.basename(filePath)}`;
+    const { memory } = palace.addDrawer(wing, room, hall, targetPath, content);
+    console.log('✅ Backfilled file into live AthenaMem');
+    console.log(`File: ${filePath}`);
+    console.log(`Target: ${wing}/${room}/${hall}`);
+    console.log(`Memory ID: ${memory.id}`);
 }
 async function cmdExport(kg, args) {
     if (args.length < 1) {

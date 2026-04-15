@@ -79,8 +79,6 @@ Agent receives message
 
 ## Status
 
-**Under active development.** The core modules are scaffolded and the architecture is defined. See `SPEC.md` for the full roadmap.
-
 Current status:
 - ✅ Core KG (SQLite with temporal validity)
 - ✅ WAL enforcement
@@ -90,23 +88,8 @@ Current status:
 - ✅ Search orchestrator (RRF fusion)
 - ✅ CLI
 - ✅ MCP server + OpenClaw plugin
+- ✅ Eval harness
 - ⏳ Specialist agents + diaries
-
----
-
-## Status
-
-**Under active development.** The core modules are scaffolded and the architecture is defined. See `SPEC.md` for the full roadmap.
-
-Current status:
-- ✅ Core KG (SQLite with temporal validity)
-- ✅ WAL enforcement
-- ✅ Contradiction detection engine
-- ✅ Palace structure (wings/rooms/closets/drawers)
-- ✅ Compaction engine (DAG-based)
-- ✅ Search orchestrator (RRF fusion)
-- ✅ CLI
-
 
 ---
 
@@ -133,7 +116,20 @@ athenamem recall "why did we switch database"
 
 # Quick search (qmd + KG only)
 athenamem search "database decision"
+
+# End-user maintenance
+athenamem doctor
+athenamem verify "SQLite with WAL"
+athenamem backfill-file ~/.openclaw/workspace/memory/2026-04-14.md main backfill discoveries
+athenamem rebuild-fts
 ```
+
+### Maintenance Commands
+
+- `athenamem doctor` checks the live DB, palace path, ClawVault path, workspace memory path, qmd index, and basic FTS health.
+- `athenamem verify <query>` smoke-tests whether a known fact is actually searchable.
+- `athenamem backfill-file <file> [wing room hall]` ingests a markdown/text file into the live AthenaMem database.
+- `athenamem rebuild-fts` rebuilds the FTS index when recall goes weird.
 
 ---
 
