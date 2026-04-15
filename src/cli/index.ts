@@ -463,57 +463,76 @@ async function cmdVerify(kg: KnowledgeGraph, palace: Palace, args: string[]): Pr
   const query = args.join(' ');
   if (!query) throw new Error('Usage: athenamem verify <query>');
 
+  const tokens = query
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .map(t => t.trim())
+    .filter(t => t.length >= 2);
+
   const orchestrator = new SearchOrchestrator(kg, palace);
   const response = await orchestrator.deepSearch(query, 5);
   const results = response.results;
   console.log(`# Verify: ${query}\n`);
-  if (results.length === 0) {
-    const tokens = query
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .map(t => t.trim())
-      .filter(t => t.length >= 2);
-
-    const fallbackMemories = kg.searchMemories(query, undefined, undefined, 5).filter(mem => {
-      const lower = mem.content.toLowerCase();
-      const matches = tokens.filter(token => lower.includes(token)).length;
-      return tokens.length === 0 ? true : (matches / tokens.length) >= 0.5;
-    });
-    if (fallbackMemories.length > 0) {
-      const top = fallbackMemories[0];
-      console.log(`✅ Fallback memory hit: ${top.content.substring(0, 220)}`);
-      console.log('Source: AthenaMem KG memory');
-      return;
-    }
-
-    for (const token of tokens) {
-      const entity = kg.getEntityByName(token);
-      if (!entity) continue;
-      const facts = kg.getEntityFacts(entity.id);
-      const rel = facts.outgoing[0] ?? facts.incoming[0];
-      if (rel) {
-        const otherId = rel.subject_id === entity.id ? rel.object_id : rel.subject_id;
-        const other = kg.queryEntities({ entity_id: otherId })[0];
-        const text = rel.subject_id === entity.id
-          ? `${entity.name} ${rel.predicate} ${other?.name ?? otherId}`
-          : `${other?.name ?? otherId} ${rel.predicate} ${entity.name}`;
-        console.log(`✅ Fallback KG fact hit: ${text}`);
-        console.log('Source: AthenaMem KG relation');
-        return;
-      }
-    }
-
-    console.log('❌ No results');
-    process.exitCode = 1;
+  if (results.length > 0) {
+    const top = results[0];
+    console.log(`✅ Top hit: ${top.content.substring(0, 220)}`);
+    console.log(`Source: ${top.source_name}`);
+    console.log(`Score: ${top.score.toFixed(3)}`);
+    console.log(`Systems with results: ${response.sources_with_results.join(', ') || 'none'}`);
     return;
   }
 
-  const top = results[0];
-  console.log(`✅ Top hit: ${top.content.substring(0, 220)}`);
-  console.log(`Source: ${top.source_name}`);
-  console.log(`Score: ${top.score.toFixed(3)}`);
-  console.log(`Systems with results: ${response.sources_with_results.join(', ') || 'none'}`);
+  const fallbackMemories = kg.searchMemories(query, undefined, undefined, 10).filter(mem => {
+    const lower = mem.content.toLowerCase();
+    const matches = tokens.filter(token => lower.includes(token)).length;
+    return tokens.length === 0 ? true : (matches / tokens.length) >= 0.5;
+  });
+  if (fallbackMemories.length > 0) {
+    const top = fallbackMemories[0];
+    console.log(`✅ Fallback memory hit: ${top.content.substring(0, 220)}`);
+    console.log('Source: AthenaMem KG memory');
+    return;
+  }
+
+  const entities = kg.queryEntities({ include_expired: true });
+  const scoredFacts: Array<{ text: string; score: number }> = [];
+  const seenFacts = new Set<string>();
+
+  for (const entity of entities) {
+    const entityText = `${entity.name} ${entity.type}`.toLowerCase();
+    const entityMatches = tokens.filter(token => entityText.includes(token)).length;
+    if (tokens.length > 0 && entityMatches === 0) continue;
+
+    const facts = kg.getEntityFacts(entity.id);
+    for (const rel of [...facts.outgoing, ...facts.incoming]) {
+      const subject = kg.queryEntities({ entity_id: rel.subject_id, include_expired: true })[0];
+      const object = kg.queryEntities({ entity_id: rel.object_id, include_expired: true })[0];
+      const text = `${subject?.name ?? rel.subject_id} ${rel.predicate} ${object?.name ?? rel.object_id}`;
+      if (seenFacts.has(text)) continue;
+      seenFacts.add(text);
+
+      const lower = text.toLowerCase();
+      const matches = tokens.filter(token => lower.includes(token)).length;
+      if (tokens.length > 0 && matches === 0) continue;
+
+      const fullMatch = lower.includes(query.toLowerCase()) ? 100 : 0;
+      const score = fullMatch + matches * 10;
+      scoredFacts.push({ text, score });
+    }
+  }
+
+  scoredFacts.sort((a, b) => b.score - a.score || a.text.localeCompare(b.text));
+  const topFact = scoredFacts[0];
+  if (topFact) {
+    console.log(`✅ Fallback KG fact hit: ${topFact.text}`);
+    console.log('Source: AthenaMem KG relation');
+    console.log(`Match score: ${topFact.score}`);
+    return;
+  }
+
+  console.log('❌ No results');
+  process.exitCode = 1;
 }
 
 async function cmdBackfillFile(kg: KnowledgeGraph, palace: Palace, args: string[]): Promise<void> {
