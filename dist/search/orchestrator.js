@@ -100,7 +100,8 @@ export class SearchOrchestrator {
             // Find the best-scoring result for this ID across all systems
             const res = this.findResultById(rankedLists, id);
             if (res) {
-                res.score = score;
+                const lexicalBoost = this.computeLexicalBoost(query, `${res.content}\n${res.source_name}`);
+                res.score = score * lexicalBoost;
                 allResults.push(res);
             }
         }
@@ -258,21 +259,66 @@ export class SearchOrchestrator {
         }
     }
     async queryKG(query, module, section, limit = 20) {
-        // KG search uses FTS on memories
+        const results = [];
+        // KG search uses FTS/LIKE on memories
         const memories = this.kg.searchMemories(query, module, section, limit);
-        return memories.map(m => ({
+        results.push(...memories.map(m => ({
             id: `kg:${m.id}`,
             content: m.content,
             source: 'kg',
             source_name: `AthenaMem KG/${m.module}/${m.section}`,
-            score: 0.5,
+            score: this.computeLexicalBoost(query, m.content),
             module: m.module,
             section: m.section,
             memory_type: m.memory_type,
             access_count: m.access_count,
             timestamp: m.created_at,
             entry_id: m.entry_id,
-        }));
+        })));
+        // Also search actual entity and relation facts, not just memory text.
+        const tokens = this.tokenizeQuery(query);
+        const seen = new Set(results.map(r => r.id));
+        for (const token of tokens) {
+            const entity = this.kg.getEntityByName(token);
+            if (!entity)
+                continue;
+            const facts = this.kg.getEntityFacts(entity.id);
+            for (const rel of facts.outgoing) {
+                const object = this.kg.queryEntities({ entity_id: rel.object_id })[0];
+                const factText = `${entity.name} ${rel.predicate} ${object?.name ?? rel.object_id}`;
+                const id = `kgrel:${rel.id}`;
+                if (seen.has(id))
+                    continue;
+                seen.add(id);
+                results.push({
+                    id,
+                    content: factText,
+                    source: 'kg',
+                    source_name: 'AthenaMem KG/fact',
+                    score: this.computeLexicalBoost(query, factText),
+                    timestamp: rel.created_at,
+                });
+            }
+            for (const rel of facts.incoming) {
+                const subject = this.kg.queryEntities({ entity_id: rel.subject_id })[0];
+                const factText = `${subject?.name ?? rel.subject_id} ${rel.predicate} ${entity.name}`;
+                const id = `kgrel:${rel.id}`;
+                if (seen.has(id))
+                    continue;
+                seen.add(id);
+                results.push({
+                    id,
+                    content: factText,
+                    source: 'kg',
+                    source_name: 'AthenaMem KG/fact',
+                    score: this.computeLexicalBoost(query, factText),
+                    timestamp: rel.created_at,
+                });
+            }
+        }
+        return results
+            .sort((a, b) => b.score - a.score || (b.timestamp ?? 0) - (a.timestamp ?? 0))
+            .slice(0, limit);
     }
     // ─── Helpers ────────────────────────────────────────────────────────────────
     collectFiles(dir) {
@@ -306,11 +352,33 @@ export class SearchOrchestrator {
     }
     toRankedMap(results) {
         const map = new Map();
-        for (let i = 0; i < results.length; i++) {
-            const r = results[i];
+        const ranked = [...results].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+        for (let i = 0; i < ranked.length; i++) {
+            const r = ranked[i];
             map.set(r.id, { source: r.source, rank: i + 1, score: r.score ?? 0, result: r });
         }
         return map;
+    }
+    tokenizeQuery(query) {
+        return Array.from(new Set(query
+            .toLowerCase()
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .map(t => t.trim())
+            .filter(t => t.length >= 2)));
+    }
+    computeLexicalBoost(query, haystack) {
+        const text = haystack.toLowerCase();
+        const tokens = this.tokenizeQuery(query);
+        if (tokens.length === 0)
+            return 1;
+        let matches = 0;
+        for (const token of tokens) {
+            if (text.includes(token))
+                matches += 1;
+        }
+        const fullQueryMatch = text.includes(query.toLowerCase()) ? 0.75 : 0;
+        return 1 + (matches / tokens.length) + fullQueryMatch;
     }
     findResultById(rankedLists, id) {
         for (const map of rankedLists) {

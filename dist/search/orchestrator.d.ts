@@ -90,6 +90,8 @@ export declare class SearchOrchestrator {
     private collectFiles;
     private safeReadText;
     private toRankedMap;
+    private tokenizeQuery;
+    private computeLexicalBoost;
     private findResultById;
     /**
      * Quick search — just fires qmd + KG, skips slower systems.
