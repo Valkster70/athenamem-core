@@ -68,6 +68,13 @@ Agent receives message
 
 ---
 
+# Global install (optional)
+npm install -g
+# If `athenamem-core` fails with Permission denied, run:
+chmod +x $(npm root -g)/athenamem-core/dist/cli/index.js
+
+---
+
 ## Quick Start
 
 ```bash
