@@ -86,6 +86,7 @@
     "on_agent_boot": "athenamem_wake",
     "on_agent_sleep": "athenamem_sleep",
     "on_turn": "athenamem_on_turn",
+    "on_commit": "athenamem_on_commit",
     "on_flush": "athenamem_on_flush"
   }
 }
