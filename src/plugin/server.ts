@@ -495,7 +495,7 @@ export async function toolKgAdd(
   
   const subjectEntity = c.kg.addEntity(subject, inferredSubjectType, metadata);
   const objectEntity = c.kg.addEntity(object, inferredObjectType, metadata);
-  const relation = c.kg.addRelation(
+  const { relation } = c.kg.addRelation(
     subjectEntity.id,
     predicate,
     objectEntity.id,

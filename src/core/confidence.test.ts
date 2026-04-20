@@ -244,7 +244,7 @@ describe('ConfidenceStore', () => {
       const store = storeForKG(kg);
       const e1 = kg.addEntity('S1', 'topic');
       const e2 = kg.addEntity('O1', 'topic');
-      const rel = kg.addRelation(e1.id, 'works_on', e2.id, 1.0);
+      const rel = kg.addRelation(e1.id, 'works_on', e2.id, 1.0).relation;
       const result = store.adjustRelationConfidence(rel.id, -0.4, 'somatic_error', 'kg_inference');
       expect(result.old_confidence).toBe(1.0);
       expect(result.new_confidence).toBe(0.6);

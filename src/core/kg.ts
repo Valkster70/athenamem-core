@@ -13,6 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ConfidenceStore, DecayReport } from './confidence.js';
 
 // ─── Schemas ─────────────────────────────────────────────────────────────────
 
@@ -142,9 +143,11 @@ export interface KGStats {
 export class KnowledgeGraph {
   private db: Database.Database;
   private _dbPath: string;
+  private _confidenceStore: ConfidenceStore | null = null;
 
-  constructor(dbPath: string) {
+  constructor(dbPath: string, confidenceStore?: ConfidenceStore) {
     this._dbPath = dbPath;
+    this._confidenceStore = confidenceStore ?? null;
     const dir = path.dirname(dbPath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
@@ -153,6 +156,16 @@ export class KnowledgeGraph {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.init();
+  }
+
+  /**
+   * Attach a ConfidenceStore to this KG (can be done post-construction).
+   */
+  setConfidenceStore(store: ConfidenceStore): void {
+    this._confidenceStore = store;
+  }
+  get confidence(): ConfidenceStore | null {
+    return this._confidenceStore;
   }
 
   private init(): void {
@@ -481,10 +494,46 @@ export class KnowledgeGraph {
     this.db.prepare(`UPDATE entities SET area = ? WHERE id = ?`).run(area, entityId);
   }
 
+  // ─── Confidence / Decay ─────────────────────────────────────────────────────
+
+  /**
+   * Run the confidence decay job on all stale entities.
+   * Convenience wrapper around ConfidenceStore.applyDecay.
+   */
+  runDecay(options?: {
+    staleness_threshold_days?: number;
+    decay_per_period?: number;
+    max_decay?: number;
+  }): DecayReport | null {
+    if (!this._confidenceStore) return null;
+    return this._confidenceStore.applyDecay(options);
+  }
+
+  /**
+   * Adjust an entity's confidence (e.g. user correction/confirmation).
+   */
+  adjustEntityConfidence(
+    entityId: string,
+    delta: number,
+    reason: 'user_correction' | 'user_confirmation' | 'somatic_error' | 'somatic_confirm' | 'conflict_resolution' | 'usage_accumulation' | 'decay',
+    source: 'user_feedback' | 'kg_inference' | 'agent_decision' | 'conflict_resolution' | 'decay_cron'
+  ): ReturnType<ConfidenceStore['adjustEntityConfidence']> | null {
+    if (!this._confidenceStore) return null;
+    return this._confidenceStore.adjustEntityConfidence(entityId, delta, reason, source);
+  }
+
+  /**
+   * Get confidence stats for the KG.
+   */
+  getConfidenceStats(): ReturnType<ConfidenceStore['stats']> | null {
+    return this._confidenceStore?.stats() ?? null;
+  }
+
   // ─── Relation Operations ────────────────────────────────────────────────────
 
   /**
    * Add a relation between two entities.
+   * If a ConfidenceStore is wired, checks for conflicts and delegates confidence logging.
    */
   addRelation(
     subjectId: string,
@@ -492,7 +541,13 @@ export class KnowledgeGraph {
     objectId: string,
     confidence: number = 1.0,
     source: string | null = null
-  ): Relation {
+  ): { relation: Relation; conflict?: ReturnType<ConfidenceStore['checkConflict']> } {
+    // Conflict check before committing
+    let conflict: ReturnType<ConfidenceStore['checkConflict']> | undefined;
+    if (this._confidenceStore) {
+      conflict = this._confidenceStore.checkConflict(subjectId, predicate, objectId, confidence);
+    }
+
     const id = uuidv4();
     const now = Date.now();
 
@@ -501,7 +556,9 @@ export class KnowledgeGraph {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)
     `).run(id, subjectId, predicate, objectId, now, confidence, source, now);
 
-    return { id, subject_id: subjectId, predicate, object_id: objectId, valid_from: now, valid_to: null, confidence, source, created_at: now, last_accessed: null, access_count: 0 };
+    const relation = { id, subject_id: subjectId, predicate, object_id: objectId, valid_from: now, valid_to: null, confidence, source, created_at: now, last_accessed: null, access_count: 0 };
+
+    return { relation, conflict };
   }
 
   /**
