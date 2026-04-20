@@ -48,6 +48,12 @@ export interface Entity {
   valid_from: number;
   valid_to: number | null;  // null = still active
   metadata: Record<string, unknown>;
+  // Confidence system (added in v0.3)
+  confidence: number;
+  last_accessed: number | null;
+  access_count: number;
+  status: 'active' | 'dormant' | 'archived';
+  area: string | null;
 }
 
 export interface Relation {
@@ -60,6 +66,9 @@ export interface Relation {
   confidence: number;
   source: string | null;  // entry_id
   created_at: number;
+  // Confidence system (added in v0.3)
+  last_accessed: number | null;
+  access_count: number;
 }
 
 export interface Memory {
@@ -116,6 +125,7 @@ export interface TemporalQuery {
   entity_name?: string;
   as_of?: number;  // unix timestamp, defaults to now
   include_expired?: boolean;
+  include_stale?: boolean;  // if true, includes dormant/archived entities (default: false)
 }
 
 export interface KGStats {
@@ -277,20 +287,54 @@ export class KnowledgeGraph {
    */
   private migrate(): void {
     const memoryColumns = this.db.prepare(`PRAGMA table_info(memories)`).all() as Array<{ name: string }>;
-    const columnNames = new Set(memoryColumns.map((col) => col.name));
+    const memoryColNames = new Set(memoryColumns.map((col) => col.name));
 
-    if (!columnNames.has('status')) {
+    if (!memoryColNames.has('status')) {
       this.db.exec(`
         ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'invalidated', 'compacted', 'archived'));
       `);
     }
 
-    if (!columnNames.has('valid_to')) {
+    if (!memoryColNames.has('valid_to')) {
       this.db.exec(`ALTER TABLE memories ADD COLUMN valid_to INTEGER;`);
     }
 
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';`);
+
+    // v0.3: Add entity-level confidence fields
+    const entityColumns = this.db.prepare(`PRAGMA table_info(entities)`).all() as Array<{ name: string }>;
+    const entityColNames = new Set(entityColumns.map((col) => col.name));
+
+    if (!entityColNames.has('confidence')) {
+      this.db.exec(`ALTER TABLE entities ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0;`);
+    }
+    if (!entityColNames.has('last_accessed')) {
+      this.db.exec(`ALTER TABLE entities ADD COLUMN last_accessed INTEGER;`);
+    }
+    if (!entityColNames.has('access_count')) {
+      this.db.exec(`ALTER TABLE entities ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;`);
+    }
+    if (!entityColNames.has('status')) {
+      this.db.exec(`ALTER TABLE entities ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'dormant', 'archived'));`);
+    }
+    if (!entityColNames.has('area')) {
+      this.db.exec(`ALTER TABLE entities ADD COLUMN area TEXT;`);
+    }
+
+    // v0.3: Add relation-level access tracking
+    const relColumns = this.db.prepare(`PRAGMA table_info(relations)`).all() as Array<{ name: string }>;
+    const relColNames = new Set(relColumns.map((col) => col.name));
+
+    if (!relColNames.has('last_accessed')) {
+      this.db.exec(`ALTER TABLE relations ADD COLUMN last_accessed INTEGER;`);
+    }
+    if (!relColNames.has('access_count')) {
+      this.db.exec(`ALTER TABLE relations ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;`);
+    }
+
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_confidence ON entities(confidence) WHERE confidence < 1.0;`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_status ON entities(status) WHERE status != 'active';`);
   }
 
   // ─── Entity Operations ──────────────────────────────────────────────────────
@@ -311,11 +355,11 @@ export class KnowledgeGraph {
     const meta = JSON.stringify(metadata);
 
     this.db.prepare(`
-      INSERT INTO entities (id, name, type, created_at, valid_from, metadata)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO entities (id, name, type, created_at, valid_from, metadata, confidence, last_accessed, access_count, status)
+      VALUES (?, ?, ?, ?, ?, ?, 1.0, NULL, 0, 'active')
     `).run(id, name, type, now, now, meta);
 
-    return { id, name, type, created_at: now, valid_from: now, valid_to: null, metadata };
+    return { id, name, type, created_at: now, valid_from: now, valid_to: null, metadata, confidence: 1.0, last_accessed: null, access_count: 0, status: 'active', area: null };
   }
 
   /**
@@ -323,35 +367,45 @@ export class KnowledgeGraph {
    * If as_of is set, only returns entities that were valid at that time.
    */
   queryEntities(query: TemporalQuery = {}): Entity[] {
-    const { entity_id, entity_name, as_of = Date.now(), include_expired = false } = query;
+    const { entity_id, entity_name, as_of = Date.now(), include_expired = false, include_stale = false } = query;
 
     if (entity_id) {
       const sql = include_expired
         ? 'SELECT * FROM entities WHERE id = ?'
         : 'SELECT * FROM entities WHERE id = ? AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ?';
-      const row = include_expired
-        ? (this.db.prepare(sql).get(entity_id) as Entity | undefined)
-        : (this.db.prepare(sql).get(entity_id, as_of, as_of) as Entity | undefined);
-      return row ? [this.parseEntity(row)] : [];
+      const params: (string | number)[] = include_expired ? [entity_id] : [entity_id, as_of, as_of];
+      const row = (this.db.prepare(sql).get(...params) as Entity | undefined);
+      if (!row) return [];
+      const entity = this.parseEntity(row);
+      // Track access on returned entity
+      if (!include_stale) {
+        this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
+      }
+      return [entity];
     }
+
+    const staleFilter = include_stale ? '' : "AND status = 'active' ";
 
     if (entity_name) {
       const sql = include_expired
-        ? 'SELECT * FROM entities WHERE lower(name) = lower(?) ORDER BY created_at ASC'
-        : 'SELECT * FROM entities WHERE lower(name) = lower(?) AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ? ORDER BY created_at ASC';
-      const rows = include_expired
-        ? (this.db.prepare(sql).all(entity_name) as Entity[])
-        : (this.db.prepare(sql).all(entity_name, as_of, as_of) as Entity[]);
+        ? `SELECT * FROM entities WHERE lower(name) = lower(?) ${staleFilter}ORDER BY created_at ASC`
+        : `SELECT * FROM entities WHERE lower(name) = lower(?) AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ? ${staleFilter}ORDER BY created_at ASC`;
+      const params: (string | number)[] = include_expired ? [entity_name] : [entity_name, as_of, as_of];
+      const rows = (this.db.prepare(sql).all(...params) as Entity[]);
+      if (!include_stale && rows.length > 0) {
+        const now = Date.now();
+        for (const r of rows) {
+          this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(now, r.id);
+        }
+      }
       return rows.map(this.parseEntity);
     }
 
     const sql = include_expired
-      ? 'SELECT * FROM entities'
-      : 'SELECT * FROM entities WHERE (valid_to IS NULL OR valid_to > ?) AND valid_from <= ?';
-
-    const rows = include_expired
-      ? (this.db.prepare(sql).all() as Entity[])
-      : (this.db.prepare(sql).all(as_of, as_of) as Entity[]);
+      ? `SELECT * FROM entities ${staleFilter}`
+      : `SELECT * FROM entities WHERE (valid_to IS NULL OR valid_to > ?) AND valid_from <= ? ${staleFilter}`;
+    const params: (string | number)[] = include_expired ? [] : [as_of, as_of];
+    const rows = (this.db.prepare(sql).all(...params) as Entity[]);
     return rows.map(this.parseEntity);
   }
 
@@ -386,6 +440,47 @@ export class KnowledgeGraph {
       .run(ended, entityId, entityId);
   }
 
+  /**
+   * Touch an entity — update last_accessed and increment access_count.
+   * Call this when an entity is used in a query, reasoning, or answer.
+   */
+  touchEntity(entityId: string): void {
+    const now = Date.now();
+    this.db.prepare(`
+      UPDATE entities
+      SET access_count = COALESCE(access_count, 0) + 1,
+          last_accessed = ?
+      WHERE id = ?
+    `).run(now, entityId);
+  }
+
+  /**
+   * Touch a relation — update last_accessed and increment access_count.
+   */
+  touchRelation(relationId: string): void {
+    const now = Date.now();
+    this.db.prepare(`
+      UPDATE relations
+      SET access_count = COALESCE(access_count, 0) + 1,
+          last_accessed = ?
+      WHERE id = ?
+    `).run(now, relationId);
+  }
+
+  /**
+   * Update an entity's status (active → dormant → archived).
+   */
+  setEntityStatus(entityId: string, status: 'active' | 'dormant' | 'archived'): void {
+    this.db.prepare(`UPDATE entities SET status = ? WHERE id = ?`).run(status, entityId);
+  }
+
+  /**
+   * Update an entity's area (domain).
+   */
+  setEntityArea(entityId: string, area: string): void {
+    this.db.prepare(`UPDATE entities SET area = ? WHERE id = ?`).run(area, entityId);
+  }
+
   // ─── Relation Operations ────────────────────────────────────────────────────
 
   /**
@@ -402,11 +497,11 @@ export class KnowledgeGraph {
     const now = Date.now();
 
     this.db.prepare(`
-      INSERT INTO relations (id, subject_id, predicate, object_id, valid_from, confidence, source, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO relations (id, subject_id, predicate, object_id, valid_from, confidence, source, created_at, last_accessed, access_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)
     `).run(id, subjectId, predicate, objectId, now, confidence, source, now);
 
-    return { id, subject_id: subjectId, predicate, object_id: objectId, valid_from: now, valid_to: null, confidence, source, created_at: now };
+    return { id, subject_id: subjectId, predicate, object_id: objectId, valid_from: now, valid_to: null, confidence, source, created_at: now, last_accessed: null, access_count: 0 };
   }
 
   /**
@@ -767,7 +862,13 @@ export class KnowledgeGraph {
   private parseEntity(row: Entity): Entity {
     return {
       ...row,
-      metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata
+      metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
+      // v0.3: Fill defaults for pre-migration entities
+      confidence: (row as any).confidence ?? 1.0,
+      last_accessed: (row as any).last_accessed ?? null,
+      access_count: (row as any).access_count ?? 0,
+      status: (row as any).status ?? 'active',
+      area: (row as any).area ?? null,
     };
   }
 
