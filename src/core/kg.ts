@@ -392,10 +392,11 @@ export class KnowledgeGraph {
       const entity = this.parseEntity(row);
       // Track access on returned entity
       if (!include_stale) {
-        this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
         if (this._confidenceStore) {
           this._confidenceStore.recordEntityAccess(entity.id);
           this._confidenceStore.adjustEntityConfidence(entity.id, 0.01, 'usage_accumulation', 'kg_query');
+        } else {
+          this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
         }
       }
       return [entity];
@@ -412,10 +413,11 @@ export class KnowledgeGraph {
       if (!include_stale && rows.length > 0) {
         const now = Date.now();
         for (const r of rows) {
-          this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(now, r.id);
           if (this._confidenceStore) {
             this._confidenceStore.recordEntityAccess(r.id);
             this._confidenceStore.adjustEntityConfidence(r.id, 0.01, 'usage_accumulation', 'kg_query');
+          } else {
+            this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(now, r.id);
           }
         }
       }
@@ -439,10 +441,11 @@ export class KnowledgeGraph {
     `).get(name, type) as Entity | undefined;
     if (!row) return null;
     const entity = this.parseEntity(row);
-    this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
     if (this._confidenceStore) {
       this._confidenceStore.recordEntityAccess(entity.id);
       this._confidenceStore.adjustEntityConfidence(entity.id, 0.01, 'usage_accumulation', 'kg_query');
+    } else {
+      this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
     }
     return entity;
   }

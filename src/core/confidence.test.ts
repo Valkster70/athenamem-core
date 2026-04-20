@@ -11,8 +11,10 @@ function freshKG(): KnowledgeGraph {
 }
 
 function storeForKG(kg: KnowledgeGraph): ConfidenceStore {
-  // ConfidenceStore uses the same DB path as KG
-  return new ConfidenceStore(TEST_DB);
+  // ConfidenceStore uses the same DB path as KG and must be attached for KG delegation.
+  const store = new ConfidenceStore(TEST_DB);
+  kg.setConfidenceStore(store);
+  return store;
 }
 
 describe('ConfidenceStore', () => {
