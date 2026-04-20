@@ -70,7 +70,8 @@ Agent receives message
 
 # Global install (optional)
 npm install -g
-# If `athenamem-core` fails with Permission denied, run:
+# CLI binary after install: `athenamem`
+# If it fails with Permission denied, run:
 chmod +x $(npm root -g)/athenamem-core/dist/cli/index.js
 
 ---
@@ -89,17 +90,17 @@ npm install
 npm run build
 
 # Initialize your memory wing
-node ./dist/cli/index.js init
+athenamem init
 
 # Store a fact
-node ./dist/cli/index.js remember main decisions facts \
+athenamem remember main decisions facts \
   --content "AthenaMem uses SQLite with WAL mode for the knowledge graph"
 
 # Search
-node ./dist/cli/index.js recall "why did we choose SQLite"
+athenamem recall "why did we choose SQLite"
 
 # Health check
-node ./dist/cli/index.js doctor
+athenamem doctor
 ```
 
 ---
@@ -110,7 +111,7 @@ AthenaMem includes built-in tools for keeping your memory healthy:
 
 ```bash
 # Check system health
-node ./dist/cli/index.js doctor
+athenamem doctor
 
 # Find gaps in your memory coverage
 node ./dist/cli/index.js gap-scan ./memory
