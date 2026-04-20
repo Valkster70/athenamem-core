@@ -541,7 +541,7 @@ export class ConfidenceStore {
       SELECT entity_id, relation_id, delta, reason, source, created_at
       FROM confidence_log
       WHERE entity_id = ? AND created_at >= ?
-      ORDER BY created_at DESC
+      ORDER BY created_at ASC, rowid ASC
     `).all(entityId, cutoff) as ConfidenceDelta[];
   }
 
@@ -554,7 +554,7 @@ export class ConfidenceStore {
       SELECT entity_id, relation_id, delta, reason, source, created_at
       FROM confidence_log
       WHERE relation_id = ? AND created_at >= ?
-      ORDER BY created_at DESC
+      ORDER BY created_at ASC, rowid ASC
     `).all(relationId, cutoff) as ConfidenceDelta[];
   }
 
