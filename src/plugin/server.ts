@@ -486,6 +486,7 @@ export async function toolKgAdd(
   object_entity_id: string;
   relation_id: string;
   inferred_types: { subject: EntityType; object: EntityType };
+  conflict?: ReturnType<KnowledgeGraph['addRelation']>['conflict'];
 }> {
   const c = getContext();
   
@@ -495,7 +496,7 @@ export async function toolKgAdd(
   
   const subjectEntity = c.kg.addEntity(subject, inferredSubjectType, metadata);
   const objectEntity = c.kg.addEntity(object, inferredObjectType, metadata);
-  const { relation } = c.kg.addRelation(
+  const { relation, conflict } = c.kg.addRelation(
     subjectEntity.id,
     predicate,
     objectEntity.id,
@@ -508,6 +509,7 @@ export async function toolKgAdd(
     object_entity_id: objectEntity.id,
     relation_id: relation.id,
     inferred_types: { subject: inferredSubjectType, object: inferredObjectType },
+    conflict,
   };
 }
 
