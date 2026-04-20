@@ -391,12 +391,11 @@ async function cmdAudit(kg: KnowledgeGraph): Promise<void> {
 
 async function cmdDecay(kg: KnowledgeGraph, args: string[]): Promise<void> {
   if (!kg.confidence) {
-    // Wire ConfidenceStore if not already set
-    const dataDir = path.join(path.dirname(kg['_dbPath']), 'athenamem.db').replace('/athenamem.db', '');
+    // Wire ConfidenceStore if not already set — use the same DB as KG
     const dbPath = kg['_dbPath'] as string;
     const store = new ConfidenceStore(dbPath);
-    // Re-open KG with the store
-    console.log('ConfidenceStore wired for this run.');
+    kg.setConfidenceStore(store);
+    console.log('ConfidenceStore wired.');
   }
 
   const dryRun = args.includes('--dry-run');
