@@ -30,6 +30,7 @@ import { KnowledgeGraph } from '../core/kg.js';
 import { Palace } from '../core/palace.js';
 import { WALManager } from '../core/wal.js';
 import { SearchOrchestrator, formatSearchResults } from '../search/orchestrator.js';
+import { ConfidenceStore } from '../core/confidence.js';
 import * as fs from 'fs';
 import * as path from 'path';
 const VERSION = '0.2.0';
@@ -99,6 +100,8 @@ async function runCommand(cmd, args) {
             return cmdDiary(kg, palace, args);
         case 'audit':
             return cmdAudit(kg);
+        case 'decay':
+            return cmdDecay(kg, args);
         case 'compact':
             return cmdCompact(kg, palace, workDir);
         case 'stats':
@@ -334,6 +337,47 @@ async function cmdAudit(kg) {
     console.log('Running contradiction audit...');
     // TODO: Implement full audit
     console.log('✅ Audit complete');
+}
+async function cmdDecay(kg, args) {
+    if (!kg.confidence) {
+        // Wire ConfidenceStore if not already set — use the same DB as KG
+        const dbPath = kg['_dbPath'];
+        const store = new ConfidenceStore(dbPath);
+        kg.setConfidenceStore(store);
+        console.log('ConfidenceStore wired.');
+    }
+    const dryRun = args.includes('--dry-run');
+    const daysIdx = args.indexOf('--days');
+    const days = daysIdx >= 0 ? parseInt(args[daysIdx + 1] ?? '30', 10) : 30;
+    console.log(`Running decay (staleness threshold: ${days} days)${dryRun ? ' [DRY RUN]' : ''}...`);
+    const report = kg.runDecay({ staleness_threshold_days: days });
+    if (!report) {
+        console.log('❌ No ConfidenceStore wired. Skipping.');
+        return;
+    }
+    console.log('');
+    console.log(`Entities processed: ${report.entities_processed}`);
+    console.log(`Entities affected:  ${report.entities_affected}`);
+    console.log(`Entities dormant:   ${report.entities_dormant}`);
+    console.log(`Entities skipped:   ${report.entities_skipped}`);
+    console.log(`Relations affected: ${report.relations_affected}`);
+    if (report.details.length > 0) {
+        console.log('');
+        console.log('Details:');
+        for (const d of report.details) {
+            const icon = d.reason.includes('dormant') ? '🛌' : '📉';
+            console.log(`  ${icon} ${d.name}: ${d.old_conf.toFixed(3)} → ${d.new_conf.toFixed(3)} (${d.reason})`);
+        }
+    }
+    const stats = kg.getConfidenceStats();
+    if (stats) {
+        console.log('');
+        console.log('Confidence stats:');
+        console.log(`  Active entities:    ${stats.active_entities}`);
+        console.log(`  Dormant entities:    ${stats.dormant_entities}`);
+        console.log(`  Avg confidence:      ${stats.avg_confidence.toFixed(3)}`);
+        console.log(`  Zero-access entities: ${stats.zero_access_entities}`);
+    }
 }
 async function cmdCompact(kg, palace, workDir) {
     const { CompactionEngine, RuleBasedCompiler } = await import('../core/compaction.js');

@@ -22,6 +22,7 @@ import { CompactionEngine, RuleBasedCompiler } from '../core/compaction.js';
 import { SearchOrchestrator } from '../search/orchestrator.js';
 import { ingestMemoryEvent } from '../core/ingestion.js';
 import { traceMemory, explainRecall } from '../core/debug.js';
+import { ConfidenceStore } from '../core/confidence.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
@@ -53,7 +54,10 @@ export async function init(config = {}) {
         if (!fs.existsSync(dir))
             fs.mkdirSync(dir, { recursive: true });
     }
-    const kg = new KnowledgeGraph(path.join(cfg.data_dir, 'athenamem.db'));
+    const dbPath = path.join(cfg.data_dir, 'athenamem.db');
+    const kg = new KnowledgeGraph(dbPath);
+    const confidence = new ConfidenceStore(dbPath);
+    kg.setConfidenceStore(confidence);
     const palace = new Palace(kg, cfg.palace_dir);
     const wal = new WALManager(path.join(cfg.data_dir, 'wal'));
     const detector = new ContradictionDetector(kg);
@@ -371,12 +375,13 @@ export async function toolKgAdd(subject, predicate, object, confidence = 1.0, su
     const inferredObjectType = objectType ?? inferEntityType(object, 'person');
     const subjectEntity = c.kg.addEntity(subject, inferredSubjectType, metadata);
     const objectEntity = c.kg.addEntity(object, inferredObjectType, metadata);
-    const relation = c.kg.addRelation(subjectEntity.id, predicate, objectEntity.id, confidence, sourceMemoryId ?? null);
+    const { relation, conflict } = c.kg.addRelation(subjectEntity.id, predicate, objectEntity.id, confidence, sourceMemoryId ?? null);
     return {
         subject_entity_id: subjectEntity.id,
         object_entity_id: objectEntity.id,
         relation_id: relation.id,
         inferred_types: { subject: inferredSubjectType, object: inferredObjectType },
+        conflict,
     };
 }
 /**

@@ -1,7 +1,7 @@
 {
   "name": "athenamem-core",
   "version": "0.3.2",
-  "description": "Biomimetic memory stack for AI agents \u2014 the memory that learns",
+  "description": "Biomimetic memory stack for AI agents — the memory that learns",
   "license": "MIT",
   "type": "module",
   "openclaw": {
@@ -10,7 +10,7 @@
     ]
   },
   "bin": {
-    "athenamem-core": "./dist/cli/index.js"
+    "athenamem": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -20,7 +20,6 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
-    "@rollup/rollup-darwin-arm64": "^4.60.2",
     "better-sqlite3": "^11.10.0",
     "chalk": "^5.4.1",
     "conf": "^12.0.0",
@@ -41,5 +40,13 @@
   },
   "engines": {
     "node": ">=22.0.0"
-  }
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "plugin.json",
+    "README.md",
+    "LICENSE",
+    "scripts/deploy-hermes.sh"
+  ]
 }

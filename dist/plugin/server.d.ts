@@ -159,6 +159,7 @@ export declare function toolKgAdd(subject: string, predicate: Predicate, object:
         subject: EntityType;
         object: EntityType;
     };
+    conflict?: ReturnType<KnowledgeGraph['addRelation']>['conflict'];
 }>;
 /**
  * athenamem_kg_invalidate — mark memory or entity as no longer current.

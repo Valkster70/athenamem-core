@@ -8,6 +8,7 @@
  * Every fact is traceable to a source entry.
  */
 import { z } from 'zod';
+import { ConfidenceStore, DecayReport } from './confidence.js';
 export declare const EntityTypeSchema: z.ZodEnum<["person", "project", "topic", "decision", "lesson", "event", "preference", "agent"]>;
 export type EntityType = z.infer<typeof EntityTypeSchema>;
 export declare const PredicateSchema: z.ZodEnum<["works_on", "decided", "prefers", "learned", "assigned_to", "completed", "conflicts_with", "related_to", "created", "updated", "failed", "succeeded", "recommended", "rejected", "mentioned", "owns", "depends_on"]>;
@@ -24,6 +25,11 @@ export interface Entity {
     valid_from: number;
     valid_to: number | null;
     metadata: Record<string, unknown>;
+    confidence: number;
+    last_accessed: number | null;
+    access_count: number;
+    status: 'active' | 'dormant' | 'archived';
+    area: string | null;
 }
 export interface Relation {
     id: string;
@@ -35,6 +41,8 @@ export interface Relation {
     confidence: number;
     source: string | null;
     created_at: number;
+    last_accessed: number | null;
+    access_count: number;
 }
 export interface Memory {
     id: string;
@@ -77,6 +85,7 @@ export interface TemporalQuery {
     entity_name?: string;
     as_of?: number;
     include_expired?: boolean;
+    include_stale?: boolean;
 }
 export interface KGStats {
     entity_count: number;
@@ -89,7 +98,13 @@ export interface KGStats {
 export declare class KnowledgeGraph {
     private db;
     private _dbPath;
-    constructor(dbPath: string);
+    private _confidenceStore;
+    constructor(dbPath: string, confidenceStore?: ConfidenceStore);
+    /**
+     * Attach a ConfidenceStore to this KG (can be done post-construction).
+     */
+    setConfidenceStore(store: ConfidenceStore): void;
+    get confidence(): ConfidenceStore | null;
     private init;
     /**
      * Database migrations for schema updates.
@@ -120,9 +135,47 @@ export declare class KnowledgeGraph {
      */
     invalidateEntity(entityId: string, ended?: number): void;
     /**
-     * Add a relation between two entities.
+     * Touch an entity — update last_accessed and increment access_count.
+     * Call this when an entity is used in a query, reasoning, or answer.
      */
-    addRelation(subjectId: string, predicate: Predicate, objectId: string, confidence?: number, source?: string | null): Relation;
+    touchEntity(entityId: string): void;
+    /**
+     * Touch a relation — update last_accessed and increment access_count.
+     */
+    touchRelation(relationId: string): void;
+    /**
+     * Update an entity's status (active → dormant → archived).
+     */
+    setEntityStatus(entityId: string, status: 'active' | 'dormant' | 'archived'): void;
+    /**
+     * Update an entity's area (domain).
+     */
+    setEntityArea(entityId: string, area: string): void;
+    /**
+     * Run the confidence decay job on all stale entities.
+     * Convenience wrapper around ConfidenceStore.applyDecay.
+     */
+    runDecay(options?: {
+        staleness_threshold_days?: number;
+        decay_per_period?: number;
+        max_decay?: number;
+    }): DecayReport | null;
+    /**
+     * Adjust an entity's confidence (e.g. user correction/confirmation).
+     */
+    adjustEntityConfidence(entityId: string, delta: number, reason: 'user_correction' | 'user_confirmation' | 'somatic_error' | 'somatic_confirm' | 'conflict_resolution' | 'usage_accumulation' | 'decay', source: 'user_feedback' | 'kg_inference' | 'agent_decision' | 'conflict_resolution' | 'decay_cron'): ReturnType<ConfidenceStore['adjustEntityConfidence']> | null;
+    /**
+     * Get confidence stats for the KG.
+     */
+    getConfidenceStats(): ReturnType<ConfidenceStore['stats']> | null;
+    /**
+     * Add a relation between two entities.
+     * If a ConfidenceStore is wired, checks for conflicts and delegates confidence logging.
+     */
+    addRelation(subjectId: string, predicate: Predicate, objectId: string, confidence?: number, source?: string | null): {
+        relation: Relation;
+        conflict?: ReturnType<ConfidenceStore['checkConflict']>;
+    };
     /**
      * Query relations. Supports temporal filtering.
      */

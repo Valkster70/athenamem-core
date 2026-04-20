@@ -31,8 +31,10 @@ export const CategoryTypeSchema = z.enum([
 export class KnowledgeGraph {
     db;
     _dbPath;
-    constructor(dbPath) {
+    _confidenceStore = null;
+    constructor(dbPath, confidenceStore) {
         this._dbPath = dbPath;
+        this._confidenceStore = confidenceStore ?? null;
         const dir = path.dirname(dbPath);
         if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
@@ -41,6 +43,15 @@ export class KnowledgeGraph {
         this.db.pragma('journal_mode = WAL');
         this.db.pragma('foreign_keys = ON');
         this.init();
+    }
+    /**
+     * Attach a ConfidenceStore to this KG (can be done post-construction).
+     */
+    setConfidenceStore(store) {
+        this._confidenceStore = store;
+    }
+    get confidence() {
+        return this._confidenceStore;
     }
     init() {
         this.db.exec(`
@@ -172,17 +183,46 @@ export class KnowledgeGraph {
      */
     migrate() {
         const memoryColumns = this.db.prepare(`PRAGMA table_info(memories)`).all();
-        const columnNames = new Set(memoryColumns.map((col) => col.name));
-        if (!columnNames.has('status')) {
+        const memoryColNames = new Set(memoryColumns.map((col) => col.name));
+        if (!memoryColNames.has('status')) {
             this.db.exec(`
         ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'invalidated', 'compacted', 'archived'));
       `);
         }
-        if (!columnNames.has('valid_to')) {
+        if (!memoryColNames.has('valid_to')) {
             this.db.exec(`ALTER TABLE memories ADD COLUMN valid_to INTEGER;`);
         }
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status) WHERE status != 'active';`);
+        // v0.3: Add entity-level confidence fields
+        const entityColumns = this.db.prepare(`PRAGMA table_info(entities)`).all();
+        const entityColNames = new Set(entityColumns.map((col) => col.name));
+        if (!entityColNames.has('confidence')) {
+            this.db.exec(`ALTER TABLE entities ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0;`);
+        }
+        if (!entityColNames.has('last_accessed')) {
+            this.db.exec(`ALTER TABLE entities ADD COLUMN last_accessed INTEGER;`);
+        }
+        if (!entityColNames.has('access_count')) {
+            this.db.exec(`ALTER TABLE entities ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;`);
+        }
+        if (!entityColNames.has('status')) {
+            this.db.exec(`ALTER TABLE entities ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'dormant', 'archived'));`);
+        }
+        if (!entityColNames.has('area')) {
+            this.db.exec(`ALTER TABLE entities ADD COLUMN area TEXT;`);
+        }
+        // v0.3: Add relation-level access tracking
+        const relColumns = this.db.prepare(`PRAGMA table_info(relations)`).all();
+        const relColNames = new Set(relColumns.map((col) => col.name));
+        if (!relColNames.has('last_accessed')) {
+            this.db.exec(`ALTER TABLE relations ADD COLUMN last_accessed INTEGER;`);
+        }
+        if (!relColNames.has('access_count')) {
+            this.db.exec(`ALTER TABLE relations ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0;`);
+        }
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_confidence ON entities(confidence) WHERE confidence < 1.0;`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_status ON entities(status) WHERE status != 'active';`);
     }
     // ─── Entity Operations ──────────────────────────────────────────────────────
     /**
@@ -199,41 +239,64 @@ export class KnowledgeGraph {
         const now = Date.now();
         const meta = JSON.stringify(metadata);
         this.db.prepare(`
-      INSERT INTO entities (id, name, type, created_at, valid_from, metadata)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO entities (id, name, type, created_at, valid_from, metadata, confidence, last_accessed, access_count, status)
+      VALUES (?, ?, ?, ?, ?, ?, 1.0, NULL, 0, 'active')
     `).run(id, name, type, now, now, meta);
-        return { id, name, type, created_at: now, valid_from: now, valid_to: null, metadata };
+        return { id, name, type, created_at: now, valid_from: now, valid_to: null, metadata, confidence: 1.0, last_accessed: null, access_count: 0, status: 'active', area: null };
     }
     /**
      * Query entities. Supports temporal filtering via `as_of`.
      * If as_of is set, only returns entities that were valid at that time.
      */
     queryEntities(query = {}) {
-        const { entity_id, entity_name, as_of = Date.now(), include_expired = false } = query;
+        const { entity_id, entity_name, as_of = Date.now(), include_expired = false, include_stale = false } = query;
         if (entity_id) {
             const sql = include_expired
                 ? 'SELECT * FROM entities WHERE id = ?'
                 : 'SELECT * FROM entities WHERE id = ? AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ?';
-            const row = include_expired
-                ? this.db.prepare(sql).get(entity_id)
-                : this.db.prepare(sql).get(entity_id, as_of, as_of);
-            return row ? [this.parseEntity(row)] : [];
+            const params = include_expired ? [entity_id] : [entity_id, as_of, as_of];
+            const row = this.db.prepare(sql).get(...params);
+            if (!row)
+                return [];
+            const entity = this.parseEntity(row);
+            // Track access on returned entity
+            if (!include_stale) {
+                if (this._confidenceStore) {
+                    this._confidenceStore.recordEntityAccess(entity.id);
+                    this._confidenceStore.adjustEntityConfidence(entity.id, 0.01, 'usage_accumulation', 'kg_query');
+                }
+                else {
+                    this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
+                }
+            }
+            return [entity];
         }
+        const staleFilter = include_stale ? '' : "AND status = 'active' ";
         if (entity_name) {
             const sql = include_expired
-                ? 'SELECT * FROM entities WHERE lower(name) = lower(?) ORDER BY created_at ASC'
-                : 'SELECT * FROM entities WHERE lower(name) = lower(?) AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ? ORDER BY created_at ASC';
-            const rows = include_expired
-                ? this.db.prepare(sql).all(entity_name)
-                : this.db.prepare(sql).all(entity_name, as_of, as_of);
+                ? `SELECT * FROM entities WHERE lower(name) = lower(?) ${staleFilter}ORDER BY created_at ASC`
+                : `SELECT * FROM entities WHERE lower(name) = lower(?) AND (valid_to IS NULL OR valid_to > ?) AND valid_from <= ? ${staleFilter}ORDER BY created_at ASC`;
+            const params = include_expired ? [entity_name] : [entity_name, as_of, as_of];
+            const rows = this.db.prepare(sql).all(...params);
+            if (!include_stale && rows.length > 0) {
+                const now = Date.now();
+                for (const r of rows) {
+                    if (this._confidenceStore) {
+                        this._confidenceStore.recordEntityAccess(r.id);
+                        this._confidenceStore.adjustEntityConfidence(r.id, 0.01, 'usage_accumulation', 'kg_query');
+                    }
+                    else {
+                        this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(now, r.id);
+                    }
+                }
+            }
             return rows.map(this.parseEntity);
         }
         const sql = include_expired
-            ? 'SELECT * FROM entities'
-            : 'SELECT * FROM entities WHERE (valid_to IS NULL OR valid_to > ?) AND valid_from <= ?';
-        const rows = include_expired
-            ? this.db.prepare(sql).all()
-            : this.db.prepare(sql).all(as_of, as_of);
+            ? `SELECT * FROM entities ${staleFilter}`
+            : `SELECT * FROM entities WHERE (valid_to IS NULL OR valid_to > ?) AND valid_from <= ? ${staleFilter}`;
+        const params = include_expired ? [] : [as_of, as_of];
+        const rows = this.db.prepare(sql).all(...params);
         return rows.map(this.parseEntity);
     }
     /**
@@ -243,7 +306,17 @@ export class KnowledgeGraph {
         const row = this.db.prepare(`
       SELECT * FROM entities WHERE name = ? AND type = ? AND valid_to IS NULL
     `).get(name, type);
-        return row ? this.parseEntity(row) : null;
+        if (!row)
+            return null;
+        const entity = this.parseEntity(row);
+        if (this._confidenceStore) {
+            this._confidenceStore.recordEntityAccess(entity.id);
+            this._confidenceStore.adjustEntityConfidence(entity.id, 0.01, 'usage_accumulation', 'kg_query');
+        }
+        else {
+            this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
+        }
+        return entity;
     }
     /**
      * Get an active entity by exact name, regardless of type.
@@ -264,18 +337,86 @@ export class KnowledgeGraph {
         this.db.prepare('UPDATE relations SET valid_to = ? WHERE subject_id = ? OR object_id = ?')
             .run(ended, entityId, entityId);
     }
+    /**
+     * Touch an entity — update last_accessed and increment access_count.
+     * Call this when an entity is used in a query, reasoning, or answer.
+     */
+    touchEntity(entityId) {
+        const now = Date.now();
+        this.db.prepare(`
+      UPDATE entities
+      SET access_count = COALESCE(access_count, 0) + 1,
+          last_accessed = ?
+      WHERE id = ?
+    `).run(now, entityId);
+    }
+    /**
+     * Touch a relation — update last_accessed and increment access_count.
+     */
+    touchRelation(relationId) {
+        const now = Date.now();
+        this.db.prepare(`
+      UPDATE relations
+      SET access_count = COALESCE(access_count, 0) + 1,
+          last_accessed = ?
+      WHERE id = ?
+    `).run(now, relationId);
+    }
+    /**
+     * Update an entity's status (active → dormant → archived).
+     */
+    setEntityStatus(entityId, status) {
+        this.db.prepare(`UPDATE entities SET status = ? WHERE id = ?`).run(status, entityId);
+    }
+    /**
+     * Update an entity's area (domain).
+     */
+    setEntityArea(entityId, area) {
+        this.db.prepare(`UPDATE entities SET area = ? WHERE id = ?`).run(area, entityId);
+    }
+    // ─── Confidence / Decay ─────────────────────────────────────────────────────
+    /**
+     * Run the confidence decay job on all stale entities.
+     * Convenience wrapper around ConfidenceStore.applyDecay.
+     */
+    runDecay(options) {
+        if (!this._confidenceStore)
+            return null;
+        return this._confidenceStore.applyDecay(options);
+    }
+    /**
+     * Adjust an entity's confidence (e.g. user correction/confirmation).
+     */
+    adjustEntityConfidence(entityId, delta, reason, source) {
+        if (!this._confidenceStore)
+            return null;
+        return this._confidenceStore.adjustEntityConfidence(entityId, delta, reason, source);
+    }
+    /**
+     * Get confidence stats for the KG.
+     */
+    getConfidenceStats() {
+        return this._confidenceStore?.stats() ?? null;
+    }
     // ─── Relation Operations ────────────────────────────────────────────────────
     /**
      * Add a relation between two entities.
+     * If a ConfidenceStore is wired, checks for conflicts and delegates confidence logging.
      */
     addRelation(subjectId, predicate, objectId, confidence = 1.0, source = null) {
+        // Conflict check before committing
+        let conflict;
+        if (this._confidenceStore) {
+            conflict = this._confidenceStore.checkConflict(subjectId, predicate, objectId, confidence);
+        }
         const id = uuidv4();
         const now = Date.now();
         this.db.prepare(`
-      INSERT INTO relations (id, subject_id, predicate, object_id, valid_from, confidence, source, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO relations (id, subject_id, predicate, object_id, valid_from, confidence, source, created_at, last_accessed, access_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0)
     `).run(id, subjectId, predicate, objectId, now, confidence, source, now);
-        return { id, subject_id: subjectId, predicate, object_id: objectId, valid_from: now, valid_to: null, confidence, source, created_at: now };
+        const relation = { id, subject_id: subjectId, predicate, object_id: objectId, valid_from: now, valid_to: null, confidence, source, created_at: now, last_accessed: null, access_count: 0 };
+        return { relation, conflict };
     }
     /**
      * Query relations. Supports temporal filtering.
@@ -579,7 +720,13 @@ export class KnowledgeGraph {
     parseEntity(row) {
         return {
             ...row,
-            metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata
+            metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata,
+            // v0.3: Fill defaults for pre-migration entities
+            confidence: row.confidence ?? 1.0,
+            last_accessed: row.last_accessed ?? null,
+            access_count: row.access_count ?? 0,
+            status: row.status ?? 'active',
+            area: row.area ?? null,
         };
     }
     /**

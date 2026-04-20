@@ -1,8 +1,8 @@
 {
   "id": "athenamem-core",
-  "version": "0.2.0",
-  "name": "AthenaMem Core",
-  "description": "Biomimetic memory stack — structure architecture (modules, sections, vaults, entries), WAL enforcement, contradiction detection, DAG compaction, cross-system recall.",
+  "version": "0.3.2",
+  "name": "AthenaMem",
+  "description": "Biomimetic memory stack — confidence-weighted KG, decay, contradiction detection, DAG compaction, and cross-system recall.",
   "openclaw": {
     "version": ">=2026.3.24-beta.2"
   },
