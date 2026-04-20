@@ -1,6 +1,6 @@
 {
   "name": "athenamem-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Biomimetic memory stack for AI agents — the memory that learns",
   "license": "MIT",
   "type": "module",
@@ -20,6 +20,7 @@
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {
+    "@rollup/rollup-darwin-arm64": "^4.60.2",
     "better-sqlite3": "^11.10.0",
     "chalk": "^5.4.1",
     "conf": "^12.0.0",
