@@ -2,54 +2,90 @@
 
 ![AthenaMem](athenamem-splash.png)
 
-> **"The memory that learns."**
+> **The memory that learns.**
 
-AthenaMem is a biomimetic memory stack for AI agents. Unlike a vector store that just retrieves documents, AthenaMem **knows things** — it tracks decisions, detects contradictions, enforces durability with WAL, and reasons about what you actually meant.
+AthenaMem is a biomimetic memory system for AI agents. It does more than retrieve chunks, it tracks facts, confidence, access patterns, contradictions, and change over time.
 
-**12/12 on benchmark recall tests** — versus 50% for qmd, 0% for Hindsight and Mnemo Cortex.
-
----
-
-## The Problem
-
-Most AI memory systems are:
-
-| System type | What it does | The gap |
-|-------------|--------------|---------|
-| **Vector store** | Embeds documents, returns chunks | Knows documents, not facts. Can't tell you *why* you made a decision. |
-| **Simple KV** | Key-value pairs | No structure, no hierarchy, no search |
-| **Opaque retrieval** | Black-box RAG | Can't trace answers back to sources |
-
-AthenaMem was built to close those gaps.
+**Current release:** `v0.3.2`  
+**Status:** stable beta / early public release
 
 ---
 
-## What Makes It Different
+## Why AthenaMem exists
 
-AthenaMem has opinions:
+Most memory systems for agents are good at storing text, but weak at managing knowledge.
 
-- **Don't summarize, make it findable** — verbatim storage is a feature. You can always drill down.
-- **Write before you respond** — WAL enforcement means no context loss, even on crashes.
-- **Contradictions are first-class** — if you change your mind, the system notices and flags it.
-- **Every fact traces back to its source** — DAG-compacted summaries always link to originals.
-- **Multi-system fusion** — queries fire across qmd, ClawVault, Hindsight, Mnemo, and its own KG simultaneously, then fuses results with Reciprocal Rank Fusion.
+AthenaMem is built for agents that need memory with structure and behavior:
+
+- **Knowledge graph memory** instead of just embeddings
+- **Confidence-weighted facts** that can strengthen or decay
+- **Access tracking** so memory changes based on actual use
+- **Dormancy** for stale knowledge that should fade out gracefully
+- **Contradiction surfacing** when new facts collide with old ones
+- **Durable WAL-first writes** so context is stored before replies are generated
+- **Cross-system recall fusion** across AthenaMem, qmd, ClawVault, Hindsight, and Mnemo
+
+---
+
+## Standout features
+
+### Confidence-weighted knowledge graph
+Entities and relations carry confidence, access count, last accessed time, status, and area.
+
+This means AthenaMem can represent not just *what is known*, but *how strongly it is believed*.
+
+### Memory that changes over time
+AthenaMem supports:
+
+- **confidence gain** from repeated use or confirmation
+- **confidence decay** for zero-access stale knowledge
+- **dormant entities** when confidence reaches zero
+- **reactivation** when dormant knowledge becomes relevant again
+
+### Inline contradiction and conflict surfacing
+When new high-confidence facts conflict with existing ones, AthenaMem can surface that conflict immediately instead of silently storing inconsistent state.
+
+### WAL durability
+AthenaMem uses write-ahead logging so memory is written before the agent responds. That makes it more resilient to crashes, interruptions, and context loss.
+
+### Cross-system recall
+AthenaMem doesn't pretend it is the only memory system. It can search and fuse results from:
+
+- AthenaMem KG
+- qmd
+- ClawVault
+- Hindsight
+- Mnemo Cortex
+
+---
+
+## What makes it different
+
+| System | Typical behavior | AthenaMem difference |
+|--------|------------------|----------------------|
+| Vector memory | Retrieves similar chunks | Tracks structured facts and relationships |
+| Notes / journals | Stores raw text | Adds confidence, decay, contradictions, and recall behavior |
+| Naive RAG memory | Finds text that looks relevant | Knows entities, relations, source traces, and conflict state |
+| Simple KV memory | Saves state | Evolves memory based on use and staleness |
+
+AthenaMem is closer to a **living memory layer** than a document index.
 
 ---
 
 ## Architecture
 
-```
+```text
 AthenaMem Palace
-├── L0 — Identity    Always loaded. Who am I? Who do I serve?
-├── L1 — Critical    Always loaded. Team, projects, preferences.
-├── L2 — Recent     On demand per topic. Active sessions.
-├── L3 — Deep Search  Explicit query across all systems.
-└── L4 — Archive    Curated cold storage. Rarely touched.
+├── L0 — Identity      Always loaded
+├── L1 — Critical      Always loaded
+├── L2 — Recent        On-demand per topic
+├── L3 — Deep Search   Explicit multi-system recall
+└── L4 — Archive       Curated cold storage
 ```
 
-### Palace Structure
+### Palace structure
 
-```
+```text
 WING (agent/user/project)
   └── ROOM (topic)
         └── CLOSET (summary → points to drawers)
@@ -57,26 +93,30 @@ WING (agent/user/project)
                     └── HALL (facts | events | discoveries | preferences | advice)
 ```
 
-### WAL Enforcement
+### Write-before-respond flow
 
-```
+```text
 Agent receives message
-  1. Write context to WAL (durable)
-  2. THEN generate response
-  3. After response, optionally update KG + reflections
+  1. Write context to WAL
+  2. Generate response
+  3. Update KG / reflections / compaction
 ```
 
 ---
 
-# Global install (optional)
-npm install -g
-# CLI binary after install: `athenamem`
-# If it fails with Permission denied, run:
-chmod +x $(npm root -g)/athenamem-core/dist/cli/index.js
+## Current release highlights (`v0.3.2`)
+
+- confidence-weighted KG for entities and relations
+- access tracking (`access_count`, `last_accessed`)
+- decay CLI and scheduled decay support
+- dormant entity handling
+- inline `kg_add` conflict surfacing
+- plugin/runtime wiring validated on Hermes
+- one-command Hermes deploy flow
 
 ---
 
-## Quick Start
+## Quick start
 
 ```bash
 # Clone
@@ -89,7 +129,7 @@ npm install
 # Build
 npm run build
 
-# Initialize your memory wing
+# Run CLI
 athenamem init
 
 # Store a fact
@@ -103,45 +143,82 @@ athenamem recall "why did we choose SQLite"
 athenamem doctor
 ```
 
+If you haven't installed the CLI globally, use:
+
+```bash
+node ./dist/cli/index.js <command>
+```
+
 ---
 
-## End-User Maintenance
+## Deployment
 
-AthenaMem includes built-in tools for keeping your memory healthy:
+### Current Athena / Hermes workflow
+
+From the Athena repo checkout:
+
+```bash
+./scripts/deploy-hermes.sh
+```
+
+That will:
+
+- sync the repo into the live Hermes plugin directory
+- build on Hermes
+- run tests on Hermes
+- restart the Hermes gateway
+
+---
+
+## Example operational capabilities
+
+AthenaMem can:
+
+- add structured facts to a knowledge graph
+- detect when new facts contradict existing beliefs
+- decay stale zero-access memory over time
+- keep rarely used knowledge dormant instead of pretending everything stays equally true forever
+- trace recall back to original sources
+- fuse recall across multiple memory backends
+
+---
+
+## End-user maintenance
 
 ```bash
 # Check system health
 athenamem doctor
 
-# Find gaps in your memory coverage
-node ./dist/cli/index.js gap-scan ./memory
+# Find likely memory coverage gaps
+athenamem gap-scan ./memory
 
 # Verify a fact is actually findable
-node ./dist/cli/index.js verify "SQLite with WAL"
+athenamem verify "SQLite with WAL"
 
 # Backfill a source file into live memory
-node ./dist/cli/index.js backfill-file ./notes/today.md main backfill discoveries
+athenamem backfill-file ./notes/today.md main backfill discoveries
 
-# Rebuild the search index (if search feels off)
-node ./dist/cli/index.js rebuild-fts
+# Rebuild the search index
+athenamem rebuild-fts
 ```
 
 ---
 
-## Built With
+## Built with
 
-- **TypeScript** + **Node.js** (≥22)
-- **SQLite** with `better-sqlite3` — WAL mode, FTS5
-- **Reciprocal Rank Fusion** — multi-system query fusion
-- **Palace architecture** — hierarchical memory organization
-- **WAL enforcement** — crash resilience
+- **TypeScript** + **Node.js** (>=22)
+- **SQLite** with `better-sqlite3`
+- **WAL mode** and FTS-backed search
+- **Knowledge graph memory** with confidence + decay
+- **Reciprocal Rank Fusion** for multi-system recall
+- **OpenClaw plugin integration**
 
 ---
 
 ## Documentation
 
-- [SPEC.md](SPEC.md) — Full architecture specification
-- [docs/research/](docs/research/) — Research on reference systems
+- [SPEC.md](SPEC.md) — architecture and behavior
+- [docs/](docs/) — supporting docs and research
 
 ---
 
@@ -151,4 +228,4 @@ node ./dist/cli/index.js rebuild-fts
 
 ---
 
-*AthenaMem — because a good memory system should actually remember.*
+*AthenaMem, because memory should do more than retrieve text.*
