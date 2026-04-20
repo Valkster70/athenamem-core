@@ -1,7 +1,7 @@
 {
   "name": "athenamem-core",
-  "version": "0.2.1",
-  "description": "Biomimetic memory stack for AI agents — the memory that learns",
+  "version": "0.3.2",
+  "description": "Biomimetic memory stack for AI agents \u2014 the memory that learns",
   "license": "MIT",
   "type": "module",
   "openclaw": {
