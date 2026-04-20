@@ -393,6 +393,10 @@ export class KnowledgeGraph {
       // Track access on returned entity
       if (!include_stale) {
         this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
+        if (this._confidenceStore) {
+          this._confidenceStore.recordEntityAccess(entity.id);
+          this._confidenceStore.adjustEntityConfidence(entity.id, 0.01, 'usage_accumulation', 'kg_query');
+        }
       }
       return [entity];
     }
@@ -409,6 +413,10 @@ export class KnowledgeGraph {
         const now = Date.now();
         for (const r of rows) {
           this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(now, r.id);
+          if (this._confidenceStore) {
+            this._confidenceStore.recordEntityAccess(r.id);
+            this._confidenceStore.adjustEntityConfidence(r.id, 0.01, 'usage_accumulation', 'kg_query');
+          }
         }
       }
       return rows.map(this.parseEntity);
@@ -429,7 +437,14 @@ export class KnowledgeGraph {
     const row = this.db.prepare(`
       SELECT * FROM entities WHERE name = ? AND type = ? AND valid_to IS NULL
     `).get(name, type) as Entity | undefined;
-    return row ? this.parseEntity(row) : null;
+    if (!row) return null;
+    const entity = this.parseEntity(row);
+    this.db.prepare(`UPDATE entities SET access_count = COALESCE(access_count,0)+1, last_accessed = ? WHERE id = ?`).run(Date.now(), entity.id);
+    if (this._confidenceStore) {
+      this._confidenceStore.recordEntityAccess(entity.id);
+      this._confidenceStore.adjustEntityConfidence(entity.id, 0.01, 'usage_accumulation', 'kg_query');
+    }
+    return entity;
   }
 
   /**

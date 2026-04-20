@@ -36,6 +36,7 @@ export type ConfidenceSource =
   | 'user_feedback'
   | 'decay_cron'
   | 'kg_inference'
+  | 'kg_query'
   | 'agent_decision'
   | 'conflict_resolution';
 
