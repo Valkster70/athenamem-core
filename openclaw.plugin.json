@@ -27,6 +27,7 @@
     "athenamem_core_create_wing",
     "athenamem_core_create_room",
     "athenamem_core_status",
+    "athenamem_core_wal_flush",
     "athenamem_core_list_modules",
     "athenamem_core_list_sections",
     "athenamem_core_search",

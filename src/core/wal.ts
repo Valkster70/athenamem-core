@@ -45,6 +45,12 @@ export interface WALStats {
   recovery_available: boolean;
 }
 
+export interface WALFlushResult {
+  flushed: number;
+  remaining_uncommitted: number;
+  recovery_available: boolean;
+}
+
 // ─── WAL Manager ───────────────────────────────────────────────────────────────
 
 export class WALManager {
@@ -372,6 +378,58 @@ export class WALManager {
     }
 
     return 0;
+  }
+
+  /**
+   * Mark all currently uncommitted WAL entries as committed.
+   * Useful for an explicit operator-triggered flush/checkpoint.
+   */
+  flush(): WALFlushResult {
+    const walPath = this.getWalPath();
+    if (!fs.existsSync(walPath)) {
+      return {
+        flushed: 0,
+        remaining_uncommitted: 0,
+        recovery_available: fs.existsSync(this.getRecoveryPath()),
+      };
+    }
+
+    const lines = fs.readFileSync(walPath, 'utf-8').split('\n');
+    const now = Date.now();
+    let flushed = 0;
+
+    const rewritten = lines.map((line) => {
+      if (!line.trim()) return line;
+      try {
+        const entry = JSON.parse(line) as WALEntry;
+        if (!entry.committed) {
+          entry.committed = true;
+          entry.flushed_at = now;
+          flushed++;
+          return JSON.stringify(entry);
+        }
+      } catch {
+        // preserve malformed lines rather than deleting history
+      }
+      return line;
+    });
+
+    if (flushed > 0) {
+      fs.writeFileSync(walPath, rewritten.join('\n'), 'utf-8');
+      const latest = this.getLatest();
+      if (latest) {
+        fs.writeFileSync(this.getRecoveryPath(), JSON.stringify(latest, null, 2), 'utf-8');
+      }
+      this.activeEntry = null;
+      this.activeStack = [];
+    }
+
+    const stats = this.stats();
+    return {
+      flushed,
+      remaining_uncommitted: stats.uncommitted,
+      recovery_available: stats.recovery_available,
+    };
   }
 
   /**

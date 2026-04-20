@@ -12,6 +12,7 @@ import {
   getContext,
   setSession,
   toolStatus,
+  toolWalFlush,
   toolListWings,
   toolListRooms,
   toolSearch,
@@ -39,6 +40,7 @@ import {
 // ─── Tool parameter schemas ─────────────────────────────────────────────────────
 
 const EmptySchema = Type.Object({});
+const WalFlushSchema = Type.Object({});
 
 const ListRoomsSchema = Type.Object({
   wingName: Type.String(),
@@ -251,6 +253,16 @@ const athenamem = definePluginEntry({
       async execute() {
         const result = await toolStatus();
         return { content: [{ type: "text" as const, text: result }] };
+      },
+    });
+
+    api.registerTool({
+      name: "athenamem_core_wal_flush",
+      description: "Flush outstanding WAL entries by marking all uncommitted entries committed.",
+      parameters: WalFlushSchema,
+      async execute() {
+        const result = await toolWalFlush();
+        return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
       },
     });
 

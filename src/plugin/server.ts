@@ -331,6 +331,15 @@ export async function toolStatus(): Promise<string> {
 /**
  * athenamem_list_wings — all wings with counts.
  */
+export async function toolWalFlush(): Promise<{
+  flushed: number;
+  remaining_uncommitted: number;
+  recovery_available: boolean;
+}> {
+  const c = getContext();
+  return c.wal.flush();
+}
+
 export async function toolListWings(): Promise<Wing[]> {
   return getContext().palace.listWings();
 }

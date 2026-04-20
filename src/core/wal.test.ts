@@ -58,4 +58,17 @@ describe('WALManager', () => {
     expect(recovered?.committed).toBe(false);
     expect(recovered?.data.session_state).toBe('outer');
   });
+
+  it('flushes all uncommitted WAL entries', () => {
+    const { wal } = makeWal();
+
+    wal.begin({ session_state: 'one' });
+    wal.begin({ session_state: 'two' });
+
+    const result = wal.flush();
+    expect(result.flushed).toBe(2);
+    expect(result.remaining_uncommitted).toBe(0);
+    expect(wal.getUncommitted()).toEqual([]);
+    expect(wal.stats().committed).toBe(2);
+  });
 });
