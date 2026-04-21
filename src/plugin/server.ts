@@ -531,6 +531,14 @@ export async function toolKgAdd(
  */
 function inferEntityType(name: string, defaultType: EntityType = 'person'): EntityType {
   const lower = name.toLowerCase();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(name) || /\b(today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(lower)) {
+    return 'date';
+  }
+
+  if (/\b(room|office|plant|shop|warehouse|site|hq|home|house|lab|mte)\b/.test(lower) || /,\s*[A-Z]{2}$/.test(name)) {
+    return 'location';
+  }
   
   // Project indicators
   if (/\b(app|project|system|service|api|bot|agent|tool)\b/.test(lower)) {

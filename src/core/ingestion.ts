@@ -11,7 +11,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import { KnowledgeGraph, Memory, HallType, MemoryType } from './kg.js';
+import { KnowledgeGraph, Memory, HallType, MemoryType, EntityType } from './kg.js';
 import { Palace } from './palace.js';
 import { WALManager } from './wal.js';
 import { ContradictionDetector, extractFacts, checkAndFlagContradictions } from './contradiction.js';
@@ -25,8 +25,11 @@ import {
 } from './event.js';
 
 // Re-declare inferEntityType here to avoid circular dependencies
-function inferEntityType(name: string, defaultType: 'person' | 'project' | 'topic' | 'decision' | 'lesson' | 'preference' | 'agent' | 'event' = 'person'): any {
+function inferEntityType(name: string, defaultType: EntityType = 'person'): EntityType {
   const lower = name.toLowerCase();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(name) || /\b(today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(lower)) return 'date';
+  if (/\b(room|office|plant|shop|warehouse|site|hq|home|house|lab|mte)\b/.test(lower) || /,\s*[A-Z]{2}$/.test(name)) return 'location';
   
   if (/\b(app|project|system|service|api|bot|agent|tool)\b/.test(lower)) return 'project';
   if (/\b(decision|choice|option|plan|strategy)\b/.test(lower)) return 'decision';

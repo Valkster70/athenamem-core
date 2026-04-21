@@ -259,6 +259,8 @@ export class ContradictionDetector {
 
   private inferEntityType(name: string): string {
     const lower = name.toLowerCase();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(name) || /\b(today|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)\b/.test(lower)) return 'date';
+    if (/\b(room|office|plant|shop|warehouse|site|hq|home|house|lab|mte)\b/.test(lower) || /,\s*[A-Z]{2}$/.test(name)) return 'location';
     if (['team', 'we', 'everyone', 'they'].includes(lower)) return 'agent';
     if (lower.includes('project') || lower.includes('initiative')) return 'project';
     if (/^[a-z][a-z0-9_-]*$/.test(name)) return 'topic';
