@@ -9,9 +9,11 @@
  */
 import { z } from 'zod';
 import { ConfidenceStore, DecayReport } from './confidence.js';
-export declare const EntityTypeSchema: z.ZodEnum<["person", "project", "topic", "decision", "lesson", "event", "preference", "agent"]>;
+export declare const ENTITY_TYPES: readonly ["person", "project", "topic", "decision", "lesson", "event", "preference", "agent", "date", "location"];
+export declare const EntityTypeSchema: z.ZodEnum<["person", "project", "topic", "decision", "lesson", "event", "preference", "agent", "date", "location"]>;
 export type EntityType = z.infer<typeof EntityTypeSchema>;
-export declare const PredicateSchema: z.ZodEnum<["works_on", "decided", "prefers", "learned", "assigned_to", "completed", "conflicts_with", "related_to", "created", "updated", "failed", "succeeded", "recommended", "rejected", "mentioned", "owns", "depends_on"]>;
+export declare const PREDICATES: readonly ["works_on", "decided", "prefers", "learned", "assigned_to", "completed", "conflicts_with", "related_to", "created", "updated", "failed", "succeeded", "recommended", "rejected", "mentioned", "owns", "depends_on", "is_a", "born_in", "located_in", "started_on", "ended_on"];
+export declare const PredicateSchema: z.ZodEnum<["works_on", "decided", "prefers", "learned", "assigned_to", "completed", "conflicts_with", "related_to", "created", "updated", "failed", "succeeded", "recommended", "rejected", "mentioned", "owns", "depends_on", "is_a", "born_in", "located_in", "started_on", "ended_on"]>;
 export type Predicate = z.infer<typeof PredicateSchema>;
 export declare const MemoryTypeSchema: z.ZodEnum<["conversation", "decision", "lesson", "event", "preference", "fact", "discovery", "advice"]>;
 export type MemoryType = z.infer<typeof MemoryTypeSchema>;

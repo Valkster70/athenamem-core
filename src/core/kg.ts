@@ -24,11 +24,14 @@ export const ENTITY_TYPES = [
 export const EntityTypeSchema = z.enum(ENTITY_TYPES);
 export type EntityType = z.infer<typeof EntityTypeSchema>;
 
-export const PredicateSchema = z.enum([
+export const PREDICATES = [
   'works_on', 'decided', 'prefers', 'learned', 'assigned_to', 'completed',
   'conflicts_with', 'related_to', 'created', 'updated', 'failed', 'succeeded',
-  'recommended', 'rejected', 'mentioned', 'owns', 'depends_on'
-]);
+  'recommended', 'rejected', 'mentioned', 'owns', 'depends_on',
+  'is_a', 'born_in', 'located_in', 'started_on', 'ended_on'
+] as const;
+
+export const PredicateSchema = z.enum(PREDICATES);
 export type Predicate = z.infer<typeof PredicateSchema>;
 
 export const MemoryTypeSchema = z.enum([
@@ -42,6 +45,7 @@ export const CategoryTypeSchema = z.enum([
 export type CategoryType = z.infer<typeof CategoryTypeSchema>;
 
 const ENTITY_TYPE_SQL = ENTITY_TYPES.map((type) => `'${type}'`).join(',');
+const PREDICATE_SQL = PREDICATES.map((predicate) => `'${predicate}'`).join(',');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -189,11 +193,7 @@ export class KnowledgeGraph {
       CREATE TABLE IF NOT EXISTS relations (
         id TEXT PRIMARY KEY,
         subject_id TEXT NOT NULL REFERENCES entities(id),
-        predicate TEXT NOT NULL CHECK (predicate IN (
-          'works_on','decided','prefers','learned','assigned_to','completed',
-          'conflicts_with','related_to','created','updated','failed','succeeded',
-          'recommended','rejected','mentioned','owns','depends_on'
-        )),
+        predicate TEXT NOT NULL CHECK (predicate IN (${PREDICATE_SQL})),
         object_id TEXT NOT NULL REFERENCES entities(id),
         valid_from INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
         valid_to INTEGER,
@@ -332,6 +332,38 @@ export class KnowledgeGraph {
         FROM entities_old;
 
         DROP TABLE entities_old;
+      `);
+    }
+
+    const relationsTable = this.db.prepare(`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'relations'
+    `).get() as { sql?: string } | undefined;
+    const missingPredicates = PREDICATES.filter((predicate) => !relationsTable?.sql?.includes(`'${predicate}'`));
+
+    if (missingPredicates.length > 0) {
+      this.db.exec(`
+        ALTER TABLE relations RENAME TO relations_old;
+
+        CREATE TABLE relations (
+          id TEXT PRIMARY KEY,
+          subject_id TEXT NOT NULL REFERENCES entities(id),
+          predicate TEXT NOT NULL CHECK (predicate IN (${PREDICATE_SQL})),
+          object_id TEXT NOT NULL REFERENCES entities(id),
+          valid_from INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          valid_to INTEGER,
+          confidence REAL NOT NULL DEFAULT 1.0,
+          source TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          last_accessed INTEGER,
+          access_count INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT INTO relations (id, subject_id, predicate, object_id, valid_from, valid_to, confidence, source, created_at, last_accessed, access_count)
+        SELECT id, subject_id, predicate, object_id, valid_from, valid_to,
+               COALESCE(confidence, 1.0), source, created_at, last_accessed, COALESCE(access_count, 0)
+        FROM relations_old;
+
+        DROP TABLE relations_old;
       `);
     }
 

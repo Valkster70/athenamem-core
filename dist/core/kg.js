@@ -13,20 +13,25 @@ import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
 // ─── Schemas ─────────────────────────────────────────────────────────────────
-export const EntityTypeSchema = z.enum([
-    'person', 'project', 'topic', 'decision', 'lesson', 'event', 'preference', 'agent'
-]);
-export const PredicateSchema = z.enum([
+export const ENTITY_TYPES = [
+    'person', 'project', 'topic', 'decision', 'lesson', 'event', 'preference', 'agent', 'date', 'location'
+];
+export const EntityTypeSchema = z.enum(ENTITY_TYPES);
+export const PREDICATES = [
     'works_on', 'decided', 'prefers', 'learned', 'assigned_to', 'completed',
     'conflicts_with', 'related_to', 'created', 'updated', 'failed', 'succeeded',
-    'recommended', 'rejected', 'mentioned', 'owns', 'depends_on'
-]);
+    'recommended', 'rejected', 'mentioned', 'owns', 'depends_on',
+    'is_a', 'born_in', 'located_in', 'started_on', 'ended_on'
+];
+export const PredicateSchema = z.enum(PREDICATES);
 export const MemoryTypeSchema = z.enum([
     'conversation', 'decision', 'lesson', 'event', 'preference', 'fact', 'discovery', 'advice'
 ]);
 export const CategoryTypeSchema = z.enum([
     'facts', 'events', 'discoveries', 'preferences', 'advice'
 ]);
+const ENTITY_TYPE_SQL = ENTITY_TYPES.map((type) => `'${type}'`).join(',');
+const PREDICATE_SQL = PREDICATES.map((predicate) => `'${predicate}'`).join(',');
 // ─── KnowledgeGraph Class ─────────────────────────────────────────────────────
 export class KnowledgeGraph {
     db;
@@ -59,9 +64,7 @@ export class KnowledgeGraph {
       CREATE TABLE IF NOT EXISTS entities (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        type TEXT NOT NULL CHECK (type IN (
-          'person','project','topic','decision','lesson','event','preference','agent'
-        )),
+        type TEXT NOT NULL CHECK (type IN (${ENTITY_TYPE_SQL})),
         created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
         valid_from INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
         valid_to INTEGER,
@@ -72,11 +75,7 @@ export class KnowledgeGraph {
       CREATE TABLE IF NOT EXISTS relations (
         id TEXT PRIMARY KEY,
         subject_id TEXT NOT NULL REFERENCES entities(id),
-        predicate TEXT NOT NULL CHECK (predicate IN (
-          'works_on','decided','prefers','learned','assigned_to','completed',
-          'conflicts_with','related_to','created','updated','failed','succeeded',
-          'recommended','rejected','mentioned','owns','depends_on'
-        )),
+        predicate TEXT NOT NULL CHECK (predicate IN (${PREDICATE_SQL})),
         object_id TEXT NOT NULL REFERENCES entities(id),
         valid_from INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
         valid_to INTEGER,
@@ -182,6 +181,68 @@ export class KnowledgeGraph {
      * Database migrations for schema updates.
      */
     migrate() {
+        const entitiesTable = this.db.prepare(`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'entities'
+    `).get();
+        const missingEntityTypes = ENTITY_TYPES.filter((type) => !entitiesTable?.sql?.includes(`'${type}'`));
+        if (missingEntityTypes.length > 0) {
+            this.db.exec(`
+        ALTER TABLE entities RENAME TO entities_old;
+
+        CREATE TABLE entities (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN (${ENTITY_TYPE_SQL})),
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          valid_from INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          valid_to INTEGER,
+          metadata JSON DEFAULT '{}',
+          confidence REAL NOT NULL DEFAULT 1.0,
+          last_accessed INTEGER,
+          access_count INTEGER NOT NULL DEFAULT 0,
+          status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'dormant', 'archived')),
+          area TEXT
+        );
+
+        INSERT INTO entities (id, name, type, created_at, valid_from, valid_to, metadata, confidence, last_accessed, access_count, status, area)
+        SELECT id, name, type, created_at, valid_from, valid_to, metadata,
+               COALESCE(confidence, 1.0), last_accessed, COALESCE(access_count, 0),
+               COALESCE(status, 'active'), area
+        FROM entities_old;
+
+        DROP TABLE entities_old;
+      `);
+        }
+        const relationsTable = this.db.prepare(`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'relations'
+    `).get();
+        const missingPredicates = PREDICATES.filter((predicate) => !relationsTable?.sql?.includes(`'${predicate}'`));
+        if (missingPredicates.length > 0) {
+            this.db.exec(`
+        ALTER TABLE relations RENAME TO relations_old;
+
+        CREATE TABLE relations (
+          id TEXT PRIMARY KEY,
+          subject_id TEXT NOT NULL REFERENCES entities(id),
+          predicate TEXT NOT NULL CHECK (predicate IN (${PREDICATE_SQL})),
+          object_id TEXT NOT NULL REFERENCES entities(id),
+          valid_from INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          valid_to INTEGER,
+          confidence REAL NOT NULL DEFAULT 1.0,
+          source TEXT,
+          created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000),
+          last_accessed INTEGER,
+          access_count INTEGER NOT NULL DEFAULT 0
+        );
+
+        INSERT INTO relations (id, subject_id, predicate, object_id, valid_from, valid_to, confidence, source, created_at, last_accessed, access_count)
+        SELECT id, subject_id, predicate, object_id, valid_from, valid_to,
+               COALESCE(confidence, 1.0), source, created_at, last_accessed, COALESCE(access_count, 0)
+        FROM relations_old;
+
+        DROP TABLE relations_old;
+      `);
+        }
         const memoryColumns = this.db.prepare(`PRAGMA table_info(memories)`).all();
         const memoryColNames = new Set(memoryColumns.map((col) => col.name));
         if (!memoryColNames.has('status')) {
@@ -223,6 +284,8 @@ export class KnowledgeGraph {
         }
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_confidence ON entities(confidence) WHERE confidence < 1.0;`);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_status ON entities(status) WHERE status != 'active';`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_entities_valid ON entities(valid_from, valid_to);`);
     }
     // ─── Entity Operations ──────────────────────────────────────────────────────
     /**
