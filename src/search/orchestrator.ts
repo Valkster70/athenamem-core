@@ -17,6 +17,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
+import { spawnSync } from 'child_process';
 import { KnowledgeGraph } from '../core/kg.js';
 import { Palace } from '../core/palace.js';
 
@@ -204,8 +205,10 @@ export class SearchOrchestrator {
       if (res) {
         const lexicalText = `${res.content}\n${res.source_name}`;
         const lexical = this.computeLexicalStats(query, lexicalText);
-        if (!lexical.passesThreshold) continue;
-        res.score = score * lexical.boost;
+        const requiresLexicalGate = res.source === 'qmd' || res.source === 'clawvault' || res.source === 'kg';
+        if (requiresLexicalGate && !lexical.passesThreshold) continue;
+        const scoreBoost = requiresLexicalGate ? lexical.boost : Math.max(1, lexical.boost);
+        res.score = score * scoreBoost;
         allResults.push(res);
       }
     }
@@ -257,12 +260,15 @@ export class SearchOrchestrator {
 
   private async queryQmd(query: string, limit: number): Promise<SearchResult[]> {
     try {
-      const { execSync } = require('child_process');
-      const output = execSync(`qmd search "${query.replace(/"/g, '\\"')}" --limit ${limit} 2>/dev/null`, {
+      const child = spawnSync('qmd', ['search', query, '--limit', String(limit)], {
         encoding: 'utf-8',
         timeout: 10000,
+        shell: false,
       });
 
+      if (child.error || child.status !== 0) return [];
+
+      const output = child.stdout ?? '';
       const results: SearchResult[] = [];
       const lines: string[] = output.split('\n').filter((l: string) => l.trim());
 

@@ -16,6 +16,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { homedir } from 'os';
+import { spawnSync } from 'child_process';
 // ─── Reciprocal Rank Fusion ───────────────────────────────────────────────────
 /**
  * Reciprocal Rank Fusion (RRF) — combines rankings from multiple retrieval systems.
@@ -102,9 +103,11 @@ export class SearchOrchestrator {
             if (res) {
                 const lexicalText = `${res.content}\n${res.source_name}`;
                 const lexical = this.computeLexicalStats(query, lexicalText);
-                if (!lexical.passesThreshold)
+                const requiresLexicalGate = res.source === 'qmd' || res.source === 'clawvault' || res.source === 'kg';
+                if (requiresLexicalGate && !lexical.passesThreshold)
                     continue;
-                res.score = score * lexical.boost;
+                const scoreBoost = requiresLexicalGate ? lexical.boost : Math.max(1, lexical.boost);
+                res.score = score * scoreBoost;
                 allResults.push(res);
             }
         }
@@ -144,11 +147,14 @@ export class SearchOrchestrator {
     }
     async queryQmd(query, limit) {
         try {
-            const { execSync } = require('child_process');
-            const output = execSync(`qmd search "${query.replace(/"/g, '\\"')}" --limit ${limit} 2>/dev/null`, {
+            const child = spawnSync('qmd', ['search', query, '--limit', String(limit)], {
                 encoding: 'utf-8',
                 timeout: 10000,
+                shell: false,
             });
+            if (child.error || child.status !== 0)
+                return [];
+            const output = child.stdout ?? '';
             const results = [];
             const lines = output.split('\n').filter((l) => l.trim());
             // Parse qmd output format (file:score:content)
