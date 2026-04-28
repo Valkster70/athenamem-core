@@ -866,6 +866,15 @@ export class KnowledgeGraph {
   }
 
   /**
+   * Clear a contradiction flag — marks the memory as resolved.
+   */
+  clearContradiction(memoryId: string): void {
+    this.db.prepare(`
+      UPDATE memories SET contradiction_flag = 0, contradiction_with = NULL WHERE id = ?
+    `).run(memoryId);
+  }
+
+  /**
    * Record an access — updates last_accessed and increments access_count.
    */
   recordAccess(memoryId: string): void {

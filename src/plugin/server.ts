@@ -644,11 +644,42 @@ export async function toolCheckFacts(text: string): Promise<{
 export async function toolResolveConflict(
   memoryId: string,
   resolution: 'keep_new' | 'keep_old' | 'merge' | 'invalidate_old'
-): Promise<{ resolved: boolean; action: string }> {
+): Promise<{ resolved: boolean; action: string; memoryId: string; invalidatedId?: string }> {
   const c = getContext();
-  // For now, just unflag the contradiction
-  // In a full implementation, this would do the actual merge/invalidation
-  return { resolved: true, action: resolution };
+  const memory = c.kg.getMemoryById(memoryId);
+  if (!memory) {
+    return { resolved: false, action: 'not_found', memoryId };
+  }
+
+  const conflictingId = memory.contradiction_with;
+  if (!conflictingId) {
+    return { resolved: false, action: 'no_conflict', memoryId };
+  }
+
+  switch (resolution) {
+    case 'keep_new':
+      // Invalidate the old (conflicting) memory, keep the new one
+      c.kg.invalidateMemory(conflictingId, 'superseded');
+      return { resolved: true, action: 'keep_new', memoryId, invalidatedId: conflictingId };
+
+    case 'keep_old':
+      // Invalidate the new memory, keep the old one
+      c.kg.invalidateMemory(memoryId, 'superseded');
+      return { resolved: true, action: 'keep_old', memoryId, invalidatedId: memoryId };
+
+    case 'merge':
+      // Both remain valid — clear contradiction flags on both
+      c.kg.clearContradiction(memoryId);
+      c.kg.clearContradiction(conflictingId);
+      return { resolved: true, action: 'merge', memoryId };
+
+    case 'invalidate_old':
+      c.kg.invalidateMemory(conflictingId, 'superseded');
+      return { resolved: true, action: 'invalidate_old', memoryId, invalidatedId: conflictingId };
+
+    default:
+      return { resolved: false, action: 'unknown_resolution', memoryId };
+  }
 }
 
 /**

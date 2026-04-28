@@ -227,7 +227,7 @@ export class ConfidenceStore {
       this.logSomaticEvent(entity.area, reason === 'somatic_error' ? 'error' : 'confirm', somatic_delta, reason_text);
       // Also apply area-based default adjustment
       const area_default = AREA_DEFAULTS[entity.area] ?? 1.0;
-      const adjusted_delta = delta * (area_default < 1.0 ? area_default : 1.0);
+      delta = delta * (area_default < 1.0 ? area_default : 1.0);
     }
 
     let became_dormant = false;
