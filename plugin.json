@@ -1,6 +1,6 @@
 {
   "name": "athenamem",
-  "version": "0.1.0",
+  "version": "0.3.2",
   "description": "Biomimetic memory stack for AI agents — palace architecture, WAL enforcement, contradiction detection, DAG compaction",
   "author": "AthenaMem Team",
   "openclaw": {

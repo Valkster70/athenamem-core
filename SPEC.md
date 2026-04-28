@@ -1,6 +1,6 @@
 # AthenaMem Core — Architecture Specification
 
-> **Version:** 0.2.0  
+> **Version:** 0.3.2  
 > **Status:** Core modules complete, runtime verified  
 
 ---
