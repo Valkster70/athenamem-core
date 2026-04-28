@@ -125,7 +125,7 @@ Fact extraction → KG comparison → conflict flagging:
 
 ---
 
-## MCP Tools (20)
+## MCP Tools (22)
 
 | Tool | Purpose |
 |------|---------|
@@ -133,6 +133,7 @@ Fact extraction → KG comparison → conflict flagging:
 | `athenamem_core_list_modules` | List all wings |
 | `athenamem_core_list_sections` | List rooms in a wing |
 | `athenamem_core_search` | Hybrid search |
+| `athenamem_core_quick_search` | Quick search (qmd + KG only) |
 | `athenamem_core_get_aaak_spec` | AAAK dialect reference |
 | `athenamem_core_add_entry` | Store verbatim content |
 | `athenamem_core_delete_entry` | Remove entry (soft) |
@@ -149,6 +150,7 @@ Fact extraction → KG comparison → conflict flagging:
 | `athenamem_core_recall` | Deep cross-system search |
 | `athenamem_core_create_wing` | Create new wing |
 | `athenamem_core_create_room` | Create new room |
+| `athenamem_core_wal_flush` | Force WAL to disk |
 
 ---
 
